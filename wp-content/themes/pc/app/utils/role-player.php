@@ -9,8 +9,10 @@
  */
 function add_player_role(): void {
 	if ( ! get_role( 'player' ) ) {
+		get_role( 'administrator' )?->add_cap( 'play' );
 		add_role( 'player', 'Player', [
 				'read' => false,
+				'play' => true,
 			]
 		);
 	}

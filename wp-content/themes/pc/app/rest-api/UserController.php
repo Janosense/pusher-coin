@@ -7,6 +7,7 @@ use WP_REST_Controller;
 use WP_REST_Request;
 use WP_REST_Response;
 use WP_REST_Server;
+use WP_Application_Passwords;
 
 class UserController extends WP_REST_Controller {
 
@@ -22,15 +23,20 @@ class UserController extends WP_REST_Controller {
 		register_rest_route( $this->namespace, "/$this->rest_base/sign-up/", [
 			'methods'             => WP_REST_Server::CREATABLE,
 			'callback'            => [ $this, 'create_user' ],
-			'permission_callback' => '__return_true',
+			'permission_callback' => [ $this, 'check_permission' ],
 			'args'                => $this->get_endpoint_args_for_item_schema(),
 		] );
+	}
+
+	public function check_permission( WP_REST_Request $request ) {
+		return true;
 	}
 
 	/**
 	 * Create a new user
 	 *
 	 * @param WP_REST_Request $request Full data about the request.
+	 *
 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
 	 */
 	public function create_user( WP_REST_Request $request ) {
@@ -112,7 +118,7 @@ class UserController extends WP_REST_Controller {
 		}
 
 		// Prepare response data
-		$user = get_user_by( 'id', $user_id );
+		$user          = get_user_by( 'id', $user_id );
 		$response_data = array(
 			'id'       => $user_id,
 			'email'    => $user->user_email,
@@ -138,34 +144,34 @@ class UserController extends WP_REST_Controller {
 	 * @return array
 	 */
 	public function get_item_schema(): array {
-		$schema = array(
+		$schema = [
 			'$schema'    => 'http://json-schema.org/draft-04/schema#',
 			'title'      => 'user',
 			'type'       => 'object',
-			'properties' => array(
-				'email' => array(
+			'properties' => [
+				'email'    => [
 					'description' => __( 'User email address.' ),
 					'type'        => 'string',
 					'format'      => 'email',
 					'required'    => true,
-				),
-				'nickname' => array(
+				],
+				'nickname' => [
 					'description' => __( 'User nickname.' ),
 					'type'        => 'string',
 					'required'    => true,
-				),
-				'phone' => array(
+				],
+				'phone'    => [
 					'description' => __( 'User phone number.' ),
 					'type'        => 'string',
 					'required'    => false,
-				),
-				'password' => array(
+				],
+				'password' => [
 					'description' => __( 'User password.' ),
 					'type'        => 'string',
 					'required'    => true,
-				),
-			),
-		);
+				],
+			],
+		];
 
 		return $this->add_additional_fields_schema( $schema );
 	}
