@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'tmeister/wp-api-jwt-auth',
-        'pretty_version' => '1.4.0',
-        'version' => '1.4.0.0',
-        'reference' => '9dcaeaa7171dc556ac35d569ece9c297c8bdc1bc',
+        'pretty_version' => '1.4.1',
+        'version' => '1.4.1.0',
+        'reference' => 'a01e941c29f4cf7ed0e160d18d8260970ed841f7',
         'type' => 'wordpress-plugin',
         'install_path' => __DIR__ . '/../../../',
         'aliases' => array(),
@@ -41,9 +41,9 @@
             ),
         ),
         'tmeister/wp-api-jwt-auth' => array(
-            'pretty_version' => '1.4.0',
-            'version' => '1.4.0.0',
-            'reference' => '9dcaeaa7171dc556ac35d569ece9c297c8bdc1bc',
+            'pretty_version' => '1.4.1',
+            'version' => '1.4.1.0',
+            'reference' => 'a01e941c29f4cf7ed0e160d18d8260970ed841f7',
             'type' => 'wordpress-plugin',
             'install_path' => __DIR__ . '/../../../',
             'aliases' => array(),
