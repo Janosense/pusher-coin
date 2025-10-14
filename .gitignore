@@ -26,6 +26,7 @@ wp-content/cache/
 wp-content/themes/pc/node_modules/
 wp-content/themes/pc/package-lock.json
 wp-content/themes/pc/composer.lock
+wp-content/themes/pc/vendor/*
 
 # wpengine specific
 .smushit-status
