@@ -13,7 +13,7 @@ use Exception;
 class GoogleAuthController extends WP_REST_Controller {
 
 	public function __construct() {
-		$this->namespace = 'api/v1';
+		$this->namespace = 'pc/v1';
 		$this->rest_base = 'google-auth';
 	}
 
@@ -21,7 +21,7 @@ class GoogleAuthController extends WP_REST_Controller {
 	 * Register the routes for the objects of the controller.
 	 */
 	public function register_routes(): void {
-		register_rest_route( $this->namespace, "/$this->rest_base", [
+		register_rest_route( $this->namespace, "/$this->rest_base/authentication", [
 			'methods'             => WP_REST_Server::CREATABLE,
 			'callback'            => [ $this, 'authenticate_with_google' ],
 			'permission_callback' => '__return_true',

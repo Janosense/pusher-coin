@@ -8,7 +8,7 @@ The Google Sign-In authentication endpoint allows users to authenticate using th
 
 ## Endpoint Details
 
-- **URL**: `/wp-json/api/v1/google-auth`
+- **URL**: `/wp-json/pc/v1/google-auth/authentication`
 - **Method**: `POST`
 - **Content-Type**: `application/json`
 
