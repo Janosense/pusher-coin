@@ -136,10 +136,11 @@ class GoogleAuthController extends WP_REST_Controller {
 	 */
 	private function verify_google_token( string $id_token ) {
 		try {
-			$client = new Google_Client();
 
 			// Get Google Client ID from WordPress options or define
 			$google_client_id = defined( 'GOOGLE_CLIENT_ID' ) ? GOOGLE_CLIENT_ID : get_option( 'google_client_id' );
+			$client = new Google_Client(['client_id' => $google_client_id]);
+
 
 			if ( empty( $google_client_id ) ) {
 				return new WP_Error(
@@ -148,8 +149,6 @@ class GoogleAuthController extends WP_REST_Controller {
 					array( 'status' => 500 )
 				);
 			}
-
-			$client->setClientId( $google_client_id );
 
 			// Verify the ID token
 			$payload = $client->verifyIdToken( $id_token );

@@ -30,7 +30,7 @@ if ( getenv( 'IS_DDEV_PROJECT' ) == 'true' ) {
 
 
 	define('JWT_AUTH_SECRET_KEY', 'Yb{fx*o56Ih!a<{irR:=f(p&JhJk<xbB<jS0[uLY4)72.Jw-]]OiwxG;sak.7MnO');
-	define('JWT_AUTH_CORS_ENABLE', true);
+//	define('JWT_AUTH_CORS_ENABLE', true);
 
 	define('GOOGLE_CLIENT_ID', '412386896288-lis1ed3aqti03j53o8lmu6cbj8bk81ka.apps.googleusercontent.com');
 
