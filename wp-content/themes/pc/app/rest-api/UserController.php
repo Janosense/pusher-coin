@@ -8,6 +8,7 @@ use WP_REST_Request;
 use WP_REST_Response;
 use WP_REST_Server;
 use WP_Application_Passwords;
+use Tmeister\Firebase\JWT\JWT;
 
 class UserController extends WP_REST_Controller {
 
@@ -25,6 +26,18 @@ class UserController extends WP_REST_Controller {
 			'callback'            => [ $this, 'create_user' ],
 			'permission_callback' => [ $this, 'check_permission' ],
 			'args'                => $this->get_endpoint_args_for_item_schema(),
+		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/request-verification/", [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'request_verification_code' ],
+			'permission_callback' => [ $this, 'check_permission' ],
+		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/verify-code/", [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'verify_code' ],
+			'permission_callback' => [ $this, 'check_permission' ],
 		] );
 	}
 
@@ -174,5 +187,192 @@ class UserController extends WP_REST_Controller {
 		];
 
 		return $this->add_additional_fields_schema( $schema );
+	}
+
+	/**
+	 * Request verification code
+	 *
+	 * @param WP_REST_Request $request Full data about the request.
+	 *
+	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+	 */
+	public function request_verification_code( WP_REST_Request $request ) {
+		$login    = $request->get_param( 'login' );
+		$password = $request->get_param( 'password' );
+
+		// Validate requirIn ed fields
+		if ( empty( $login ) || empty( $password ) ) {
+			return new WP_Error(
+				'missing_required_fields',
+				__( 'Login/email and password are required fields.' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		// Authenticate the user
+		$user = wp_authenticate( $login, $password );
+
+		// If the authentication fails return an error
+		if ( is_wp_error( $user ) ) {
+			return new WP_Error(
+				'authentication_failed',
+				__( 'Invalid login credentials.' ),
+				array( 'status' => 401 )
+			);
+		}
+
+		// Generate 6-digit verification code
+		$verification_code = sprintf( '%06d', mt_rand( 0, 999999 ) );
+
+		// Store verification code in user meta with expiration (15 minutes)
+		update_user_meta( $user->ID, 'verification_code', $verification_code );
+		update_user_meta( $user->ID, 'verification_code_expiry', time() + ( 15 * 60 ) );
+
+		// Send verification code via email
+		$to      = $user->user_email;
+		$subject = __( 'Your Verification Code' );
+		$message = sprintf(
+			__( "Hello %s,\n\nYour verification code is: %s\n\nThis code will expire in 15 minutes.\n\nIf you did not request this code, please ignore this email." ),
+			$user->display_name,
+			$verification_code
+		);
+		$headers = array( 'Content-Type: text/plain; charset=UTF-8' );
+
+		$email_sent = wp_mail( $to, $subject, $message, $headers );
+
+		// Check if email was sent successfully
+		if ( ! $email_sent ) {
+			// Clean up stored verification code if email failed
+			delete_user_meta( $user->ID, 'verification_code' );
+			delete_user_meta( $user->ID, 'verification_code_expiry' );
+
+			return new WP_Error(
+				'email_send_failed',
+				__( 'Failed to send verification code email. Please try again later.' ),
+				array( 'status' => 500 )
+			);
+		}
+
+		// Return success response
+		return new WP_REST_Response( array(
+			'success' => true,
+			'message' => __( 'Verification code has been sent to your email address.' )
+		), 200 );
+	}
+
+	/**
+	 * Verify code and return JWT token
+	 *
+	 * @param WP_REST_Request $request Full data about the request.
+	 *
+	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+	 */
+	public function verify_code( WP_REST_Request $request ) {
+		$login             = $request->get_param( 'login' );
+		$password          = $request->get_param( 'password' );
+		$verification_code = $request->get_param( 'code' );
+
+		// Validate required fields
+		if ( empty( $login ) || empty( $password ) || empty( $verification_code ) ) {
+			return new WP_Error(
+				'missing_required_fields',
+				__( 'Login/email, password, and verification code are required fields.' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		// Authenticate the user
+		$user = wp_authenticate( $login, $password );
+
+		// If the authentication fails return an error
+		if ( is_wp_error( $user ) ) {
+			return new WP_Error(
+				'authentication_failed',
+				__( 'Invalid login credentials.' ),
+				array( 'status' => 401 )
+			);
+		}
+
+		// Get stored verification code
+		$stored_code   = get_user_meta( $user->ID, 'verification_code', true );
+		$code_expiry   = get_user_meta( $user->ID, 'verification_code_expiry', true );
+
+		// Check if verification code exists
+		if ( empty( $stored_code ) ) {
+			return new WP_Error(
+				'no_verification_code',
+				__( 'No verification code found. Please request a new one.' ),
+				array( 'status' => 404 )
+			);
+		}
+
+		// Check if verification code is expired
+		if ( $code_expiry < time() ) {
+			delete_user_meta( $user->ID, 'verification_code' );
+			delete_user_meta( $user->ID, 'verification_code_expiry' );
+			return new WP_Error(
+				'verification_code_expired',
+				__( 'Verification code has expired. Please request a new one.' ),
+				array( 'status' => 401 )
+			);
+		}
+
+		// Verify the code
+		if ( $stored_code !== $verification_code ) {
+			return new WP_Error(
+				'invalid_verification_code',
+				__( 'Invalid verification code.' ),
+				array( 'status' => 401 )
+			);
+		}
+
+		// Clear verification code after successful verification
+		delete_user_meta( $user->ID, 'verification_code' );
+		delete_user_meta( $user->ID, 'verification_code_expiry' );
+
+		// Generate JWT token
+		$secret_key = defined( 'JWT_AUTH_SECRET_KEY' ) ? JWT_AUTH_SECRET_KEY : false;
+		if ( ! $secret_key ) {
+			return new WP_Error(
+				'jwt_auth_bad_config',
+				__( 'JWT is not configured properly, please contact the admin.' ),
+				array( 'status' => 403 )
+			);
+		}
+
+		$issuedAt  = time();
+		$notBefore = apply_filters( 'jwt_auth_not_before', $issuedAt, $issuedAt );
+		$expire    = apply_filters( 'jwt_auth_expire', $issuedAt + ( DAY_IN_SECONDS * 7 ), $issuedAt );
+
+		$token_data = [
+			'iss'  => get_bloginfo( 'url' ),
+			'iat'  => $issuedAt,
+			'nbf'  => $notBefore,
+			'exp'  => $expire,
+			'data' => [
+				'user' => [
+					'id' => $user->ID,
+				],
+			],
+		];
+
+		$algorithm = apply_filters( 'jwt_auth_algorithm', 'HS256' );
+		$token     = JWT::encode(
+			apply_filters( 'jwt_auth_token_before_sign', $token_data, $user ),
+			$secret_key,
+			$algorithm
+		);
+
+		$response_data = [
+			'token'             => $token,
+			'user_email'        => $user->user_email,
+			'user_nicename'     => $user->user_nicename,
+			'user_display_name' => $user->display_name,
+		];
+
+		return new WP_REST_Response(
+			apply_filters( 'jwt_auth_token_before_dispatch', $response_data, $user ),
+			200
+		);
 	}
 }
