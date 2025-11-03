@@ -267,7 +267,7 @@ class UserController extends WP_REST_Controller {
 	 *
 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
 	 */
-	public function verify_code( WP_REST_Request $request ) {
+	public function verify_code( WP_REST_Request $request ): WP_Error|WP_REST_Response {
 		$login             = $request->get_param( 'login' );
 		$password          = $request->get_param( 'password' );
 		$verification_code = $request->get_param( 'code' );

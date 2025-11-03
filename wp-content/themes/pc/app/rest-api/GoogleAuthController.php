@@ -33,10 +33,28 @@ class GoogleAuthController extends WP_REST_Controller {
 				],
 			],
 		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/verify-code", [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'verify_google_code' ],
+			'permission_callback' => '__return_true',
+			'args'                => [
+				'id_token' => [
+					'description' => __( 'Google ID token from Sign-In.' ),
+					'type'        => 'string',
+					'required'    => true,
+				],
+				'code' => [
+					'description' => __( 'Verification code sent to email.' ),
+					'type'        => 'string',
+					'required'    => true,
+				],
+			],
+		] );
 	}
 
 	/**
-	 * Authenticate user with Google ID token
+	 * Authenticate user with Google ID token and send verification code
 	 *
 	 * @param WP_REST_Request $request Full data about the request.
 	 *
@@ -107,6 +125,132 @@ class GoogleAuthController extends WP_REST_Controller {
 
 			$user = get_user_by( 'id', $user_id );
 		}
+
+		// Generate 6-digit verification code
+		$verification_code = sprintf( '%06d', mt_rand( 0, 999999 ) );
+
+		// Store verification code in user meta with expiration (15 minutes)
+		update_user_meta( $user->ID, 'google_verification_code', $verification_code );
+		update_user_meta( $user->ID, 'google_verification_code_expiry', time() + ( 15 * 60 ) );
+
+		// Send verification code via email
+		$to      = $user->user_email;
+		$subject = __( 'Your Verification Code' );
+		$message = sprintf(
+			__( "Hello %s,\n\nYour verification code is: %s\n\nThis code will expire in 15 minutes.\n\nIf you did not request this code, please ignore this email." ),
+			$user->display_name,
+			$verification_code
+		);
+		$headers = array( 'Content-Type: text/plain; charset=UTF-8' );
+
+		$email_sent = wp_mail( $to, $subject, $message, $headers );
+
+		// Check if email was sent successfully
+		if ( ! $email_sent ) {
+			// Clean up stored verification code if email failed
+			delete_user_meta( $user->ID, 'google_verification_code' );
+			delete_user_meta( $user->ID, 'google_verification_code_expiry' );
+
+			return new WP_Error(
+				'email_send_failed',
+				__( 'Failed to send verification code email. Please try again later.' ),
+				array( 'status' => 500 )
+			);
+		}
+
+		// Return success response
+		return new WP_REST_Response( array(
+			'requires_verification' => true,
+			'success' => true,
+			'message' => __( 'Verification code has been sent to your email address.' )
+		), 200 );
+	}
+
+	/**
+	 * Verify code and return JWT token
+	 *
+	 * @param WP_REST_Request $request Full data about the request.
+	 *
+	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+	 */
+	public function verify_google_code( WP_REST_Request $request ) {
+		$id_token          = $request->get_param( 'id_token' );
+		$verification_code = $request->get_param( 'code' );
+
+		// Validate required fields
+		if ( empty( $id_token ) || empty( $verification_code ) ) {
+			return new WP_Error(
+				'missing_required_fields',
+				__( 'Google ID token and verification code are required fields.' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		// Verify the Google ID token
+		$payload = $this->verify_google_token( $id_token );
+
+		if ( is_wp_error( $payload ) ) {
+			return $payload;
+		}
+
+		// Extract user information from the token payload
+		$email = $payload['email'] ?? '';
+
+		if ( empty( $email ) ) {
+			return new WP_Error(
+				'invalid_token_data',
+				__( 'Invalid Google token data: missing email.' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		// Get user by email
+		$user = get_user_by( 'email', $email );
+
+		if ( ! $user ) {
+			return new WP_Error(
+				'user_not_found',
+				__( 'User not found. Please authenticate first.' ),
+				array( 'status' => 404 )
+			);
+		}
+
+		// Get stored verification code
+		$stored_code = get_user_meta( $user->ID, 'google_verification_code', true );
+		$code_expiry = get_user_meta( $user->ID, 'google_verification_code_expiry', true );
+
+		// Check if verification code exists
+		if ( empty( $stored_code ) ) {
+			return new WP_Error(
+				'no_verification_code',
+				__( 'No verification code found. Please request a new one.' ),
+				array( 'status' => 404 )
+			);
+		}
+
+		// Check if verification code is expired
+		if ( $code_expiry < time() ) {
+			delete_user_meta( $user->ID, 'google_verification_code' );
+			delete_user_meta( $user->ID, 'google_verification_code_expiry' );
+			return new WP_Error(
+				'verification_code_expired',
+				__( 'Verification code has expired. Please request a new one.' ),
+				array( 'status' => 401 )
+			);
+		}
+
+		// Verify the code
+		if ( $stored_code !== $verification_code ) {
+			return new WP_Error(
+				'invalid_verification_code',
+				__( 'Invalid verification code.' ),
+				array( 'status' => 401 )
+			);
+		}
+
+		// Clear verification code after successful verification
+		delete_user_meta( $user->ID, 'google_verification_code' );
+		delete_user_meta( $user->ID, 'google_verification_code_expiry' );
 
 		// Generate JWT token for the authenticated user
 		$jwt_token = $this->generate_jwt_token( $user );
