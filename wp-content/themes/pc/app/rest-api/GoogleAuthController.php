@@ -44,7 +44,7 @@ class GoogleAuthController extends WP_REST_Controller {
 					'type'        => 'string',
 					'required'    => true,
 				],
-				'code' => [
+				'verification_code' => [
 					'description' => __( 'Verification code sent to email.' ),
 					'type'        => 'string',
 					'required'    => true,
@@ -175,7 +175,7 @@ class GoogleAuthController extends WP_REST_Controller {
 	 */
 	public function verify_google_code( WP_REST_Request $request ) {
 		$id_token          = $request->get_param( 'id_token' );
-		$verification_code = $request->get_param( 'code' );
+		$verification_code = $request->get_param( 'verification_code' );
 
 		// Validate required fields
 		if ( empty( $id_token ) || empty( $verification_code ) ) {
