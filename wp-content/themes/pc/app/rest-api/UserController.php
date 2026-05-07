@@ -127,7 +127,7 @@ class UserController extends WP_REST_Controller {
 
 		// Save phone number as user meta if provided
 		if ( ! empty( $phone ) ) {
-			update_user_meta( $user_id, 'phone', sanitize_text_field( $phone ) );
+			update_user_meta( $user_id, User_Meta_Keys::PHONE, sanitize_text_field( $phone ) );
 		}
 
 		// Prepare response data
@@ -136,7 +136,7 @@ class UserController extends WP_REST_Controller {
 			'id'       => $user_id,
 			'email'    => $user->user_email,
 			'nickname' => $user->nickname,
-			'phone'    => get_user_meta( $user_id, 'phone', true ),
+			'phone'    => get_user_meta( $user_id, User_Meta_Keys::PHONE, true ),
 		);
 
 		return new WP_REST_Response( $response_data, 201 );
@@ -225,8 +225,8 @@ class UserController extends WP_REST_Controller {
 		$verification_code = sprintf( '%06d', mt_rand( 0, 999999 ) );
 
 		// Store verification code in user meta with expiration (15 minutes)
-		update_user_meta( $user->ID, 'verification_code', $verification_code );
-		update_user_meta( $user->ID, 'verification_code_expiry', time() + ( 15 * 60 ) );
+		update_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE, $verification_code );
+		update_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE_EXPIRY, time() + ( 15 * 60 ) );
 
 		// Send verification code via email
 		$to      = $user->user_email;
@@ -243,8 +243,8 @@ class UserController extends WP_REST_Controller {
 		// Check if email was sent successfully
 		if ( ! $email_sent ) {
 			// Clean up stored verification code if email failed
-			delete_user_meta( $user->ID, 'verification_code' );
-			delete_user_meta( $user->ID, 'verification_code_expiry' );
+			delete_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE );
+			delete_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE_EXPIRY );
 
 			return new WP_Error(
 				'email_send_failed',
@@ -294,8 +294,8 @@ class UserController extends WP_REST_Controller {
 		}
 
 		// Get stored verification code
-		$stored_code   = get_user_meta( $user->ID, 'verification_code', true );
-		$code_expiry   = get_user_meta( $user->ID, 'verification_code_expiry', true );
+		$stored_code   = get_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE, true );
+		$code_expiry   = get_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE_EXPIRY, true );
 
 		// Check if verification code exists
 		if ( empty( $stored_code ) ) {
@@ -308,8 +308,8 @@ class UserController extends WP_REST_Controller {
 
 		// Check if verification code is expired
 		if ( $code_expiry < time() ) {
-			delete_user_meta( $user->ID, 'verification_code' );
-			delete_user_meta( $user->ID, 'verification_code_expiry' );
+			delete_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE );
+			delete_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE_EXPIRY );
 			return new WP_Error(
 				'verification_code_expired',
 				__( 'Verification code has expired. Please request a new one.' ),
@@ -327,8 +327,8 @@ class UserController extends WP_REST_Controller {
 		}
 
 		// Clear verification code after successful verification
-		delete_user_meta( $user->ID, 'verification_code' );
-		delete_user_meta( $user->ID, 'verification_code_expiry' );
+		delete_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE );
+		delete_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE_EXPIRY );
 
 		// Generate JWT token
 		$secret_key = defined( 'JWT_AUTH_SECRET_KEY' ) ? JWT_AUTH_SECRET_KEY : false;

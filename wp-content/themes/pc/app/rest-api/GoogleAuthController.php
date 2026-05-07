@@ -111,9 +111,9 @@ class GoogleAuthController extends WP_REST_Controller {
 			$user_id = $user->ID;
 
 			// Update Google ID if not already set
-			$existing_google_id = get_user_meta( $user_id, 'google_id', true );
+			$existing_google_id = get_user_meta( $user_id, User_Meta_Keys::GOOGLE_ID, true );
 			if ( empty( $existing_google_id ) ) {
-				update_user_meta( $user_id, 'google_id', sanitize_text_field( $google_id ) );
+				update_user_meta( $user_id, User_Meta_Keys::GOOGLE_ID, sanitize_text_field( $google_id ) );
 			}
 		} else {
 			// User doesn't exist - create new user
@@ -130,8 +130,8 @@ class GoogleAuthController extends WP_REST_Controller {
 		$verification_code = sprintf( '%06d', mt_rand( 0, 999999 ) );
 
 		// Store verification code in user meta with expiration (15 minutes)
-		update_user_meta( $user->ID, 'google_verification_code', $verification_code );
-		update_user_meta( $user->ID, 'google_verification_code_expiry', time() + ( 15 * 60 ) );
+		update_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE, $verification_code );
+		update_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE_EXPIRY, time() + ( 15 * 60 ) );
 
 		// Send verification code via email
 		$to      = $user->user_email;
@@ -148,8 +148,8 @@ class GoogleAuthController extends WP_REST_Controller {
 		// Check if email was sent successfully
 		if ( ! $email_sent ) {
 			// Clean up stored verification code if email failed
-			delete_user_meta( $user->ID, 'google_verification_code' );
-			delete_user_meta( $user->ID, 'google_verification_code_expiry' );
+			delete_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE );
+			delete_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE_EXPIRY );
 
 			return new WP_Error(
 				'email_send_failed',
@@ -216,8 +216,8 @@ class GoogleAuthController extends WP_REST_Controller {
 		}
 
 		// Get stored verification code
-		$stored_code = get_user_meta( $user->ID, 'google_verification_code', true );
-		$code_expiry = get_user_meta( $user->ID, 'google_verification_code_expiry', true );
+		$stored_code = get_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE, true );
+		$code_expiry = get_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE_EXPIRY, true );
 
 		// Check if verification code exists
 		if ( empty( $stored_code ) ) {
@@ -230,8 +230,8 @@ class GoogleAuthController extends WP_REST_Controller {
 
 		// Check if verification code is expired
 		if ( $code_expiry < time() ) {
-			delete_user_meta( $user->ID, 'google_verification_code' );
-			delete_user_meta( $user->ID, 'google_verification_code_expiry' );
+			delete_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE );
+			delete_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE_EXPIRY );
 			return new WP_Error(
 				'verification_code_expired',
 				__( 'Verification code has expired. Please request a new one.' ),
@@ -249,8 +249,8 @@ class GoogleAuthController extends WP_REST_Controller {
 		}
 
 		// Clear verification code after successful verification
-		delete_user_meta( $user->ID, 'google_verification_code' );
-		delete_user_meta( $user->ID, 'google_verification_code_expiry' );
+		delete_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE );
+		delete_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE_EXPIRY );
 
 		// Generate JWT token for the authenticated user
 		$jwt_token = $this->generate_jwt_token( $user );
@@ -355,7 +355,7 @@ class GoogleAuthController extends WP_REST_Controller {
 		}
 
 		// Store Google ID in user meta
-		update_user_meta( $user_id, 'google_id', sanitize_text_field( $google_id ) );
+		update_user_meta( $user_id, User_Meta_Keys::GOOGLE_ID, sanitize_text_field( $google_id ) );
 
 		return $user_id;
 	}
