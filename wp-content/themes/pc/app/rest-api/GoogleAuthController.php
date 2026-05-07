@@ -2,13 +2,13 @@
 
 namespace PC;
 
+use Exception;
 use Google_Client;
 use WP_Error;
 use WP_REST_Controller;
 use WP_REST_Request;
 use WP_REST_Response;
 use WP_REST_Server;
-use Exception;
 
 class GoogleAuthController extends WP_REST_Controller {
 
@@ -61,6 +61,12 @@ class GoogleAuthController extends WP_REST_Controller {
 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
 	 */
 	public function authenticate_with_google( WP_REST_Request $request ) {
+		$rate_check = Rate_Limiter::check( 'google_auth:' . Rate_Limiter::client_ip(), 5, 15 * MINUTE_IN_SECONDS );
+		if ( is_wp_error( $rate_check ) ) {
+			Audit_Log::record( 'rate_limited', array( 'metadata' => array( 'endpoint' => 'google-auth/authentication' ) ) );
+			return $rate_check;
+		}
+
 		$id_token = $request->get_param( 'id_token' );
 
 		// Validate that ID token is provided
@@ -241,6 +247,7 @@ class GoogleAuthController extends WP_REST_Controller {
 
 		// Verify the code
 		if ( $stored_code !== $verification_code ) {
+			Audit_Log::record( 'verify_failure', array( 'user_id' => $user->ID, 'metadata' => array( 'reason' => 'invalid_code', 'method' => 'google' ) ) );
 			return new WP_Error(
 				'invalid_verification_code',
 				__( 'Invalid verification code.' ),
@@ -252,23 +259,14 @@ class GoogleAuthController extends WP_REST_Controller {
 		delete_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE );
 		delete_user_meta( $user->ID, User_Meta_Keys::GOOGLE_VERIFICATION_CODE_EXPIRY );
 
-		// Generate JWT token for the authenticated user
-		$jwt_token = $this->generate_jwt_token( $user );
-
-		if ( is_wp_error( $jwt_token ) ) {
-			return $jwt_token;
+		$envelope = AuthController::issue_token_pair( $user );
+		if ( is_wp_error( $envelope ) ) {
+			return $envelope;
 		}
 
-		// Prepare successful response
-		$response_data = array(
-			'token'             => $jwt_token,
-			'user_id'           => $user->ID,
-			'user_email'        => $user->user_email,
-			'user_nicename'     => $user->user_nicename,
-			'user_display_name' => $user->display_name,
-		);
+		Audit_Log::record( 'verify_success', array( 'user_id' => $user->ID, 'metadata' => array( 'method' => 'google' ) ) );
 
-		return new WP_REST_Response( $response_data, 200 );
+		return new WP_REST_Response( $envelope, 200 );
 	}
 
 	/**
@@ -283,8 +281,6 @@ class GoogleAuthController extends WP_REST_Controller {
 
 			// Get Google Client ID from WordPress options or define
 			$google_client_id = defined( 'GOOGLE_CLIENT_ID' ) ? GOOGLE_CLIENT_ID : get_option( 'google_client_id' );
-			$client = new Google_Client(['client_id' => $google_client_id]);
-
 
 			if ( empty( $google_client_id ) ) {
 				return new WP_Error(
@@ -293,6 +289,8 @@ class GoogleAuthController extends WP_REST_Controller {
 					array( 'status' => 500 )
 				);
 			}
+
+			$client = new Google_Client( [ 'client_id' => $google_client_id ] );
 
 			// Verify the ID token
 			$payload = $client->verifyIdToken( $id_token );
@@ -383,71 +381,4 @@ class GoogleAuthController extends WP_REST_Controller {
 		return $username;
 	}
 
-	/**
-	 * Generate JWT token for authenticated user
-	 *
-	 * @param \WP_User $user The WordPress user object.
-	 *
-	 * @return string|WP_Error JWT token on success, WP_Error on failure.
-	 */
-	private function generate_jwt_token( \WP_User $user ) {
-		// Check if JWT secret key is configured
-		$secret_key = defined( 'JWT_AUTH_SECRET_KEY' ) ? JWT_AUTH_SECRET_KEY : false;
-
-		if ( ! $secret_key ) {
-			return new WP_Error(
-				'jwt_not_configured',
-				__( 'JWT is not configured properly. Please contact the administrator.' ),
-				array( 'status' => 500 )
-			);
-		}
-
-		// Import JWT library
-		if ( ! class_exists( 'Tmeister\Firebase\JWT\JWT' ) ) {
-			return new WP_Error(
-				'jwt_library_missing',
-				__( 'JWT library is not available.' ),
-				array( 'status' => 500 )
-			);
-		}
-
-		// Use WordPress JWT class
-		$jwt_class = new \Tmeister\Firebase\JWT\JWT();
-
-		// Build token data
-		$issuedAt  = time();
-		$notBefore = apply_filters( 'jwt_auth_not_before', $issuedAt, $issuedAt );
-		$expire    = apply_filters( 'jwt_auth_expire', $issuedAt + ( DAY_IN_SECONDS * 7 ), $issuedAt );
-
-		$token = array(
-			'iss'  => get_bloginfo( 'url' ),
-			'iat'  => $issuedAt,
-			'nbf'  => $notBefore,
-			'exp'  => $expire,
-			'data' => array(
-				'user' => array(
-					'id' => $user->ID,
-				),
-			),
-		);
-
-		// Get algorithm (default HS256)
-		$algorithm = apply_filters( 'jwt_auth_algorithm', 'HS256' );
-
-		// Allow modification of token before signing
-		$token = apply_filters( 'jwt_auth_token_before_sign', $token, $user );
-
-		// Encode and return the token
-		try {
-			$jwt_token = $jwt_class::encode( $token, $secret_key, $algorithm );
-
-			return $jwt_token;
-		} catch ( Exception $e ) {
-			return new WP_Error(
-				'jwt_encoding_failed',
-				sprintf( __( 'Failed to generate JWT token: %s' ), $e->getMessage() ),
-				array( 'status' => 500 )
-			);
-		}
-	}
 }

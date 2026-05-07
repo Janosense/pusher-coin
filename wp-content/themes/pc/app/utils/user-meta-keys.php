@@ -24,4 +24,14 @@ final class User_Meta_Keys {
 	public const GOOGLE_ID                       = 'google_id';
 	public const GOOGLE_VERIFICATION_CODE        = 'google_verification_code';
 	public const GOOGLE_VERIFICATION_CODE_EXPIRY = 'google_verification_code_expiry';
+
+	// Apple OAuth (AppleAuthController; stubbed in Phase 1).
+	public const APPLE_ID                       = 'apple_id';
+	public const APPLE_VERIFICATION_CODE        = 'apple_verification_code';
+	public const APPLE_VERIFICATION_CODE_EXPIRY = 'apple_verification_code_expiry';
+
+	// Phase 1 — terms acceptance and nickname state.
+	public const TERMS_ACCEPTED_AT      = 'terms_accepted_at';
+	public const TERMS_ACCEPTED_VERSION = 'terms_accepted_version';
+	public const NICKNAME_CHOSEN        = 'nickname_chosen';
 }

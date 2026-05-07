@@ -8,7 +8,6 @@ use WP_REST_Request;
 use WP_REST_Response;
 use WP_REST_Server;
 use WP_Application_Passwords;
-use Tmeister\Firebase\JWT\JWT;
 
 class UserController extends WP_REST_Controller {
 
@@ -39,6 +38,24 @@ class UserController extends WP_REST_Controller {
 			'callback'            => [ $this, 'verify_code' ],
 			'permission_callback' => [ $this, 'check_permission' ],
 		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/set-nickname", [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'set_nickname' ],
+			'permission_callback' => [ Permissions::class, 'require_logged_in' ],
+			'args'                => [
+				'nickname' => [ 'type' => 'string', 'required' => true ],
+			],
+		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/accept-terms", [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'accept_terms' ],
+			'permission_callback' => [ Permissions::class, 'require_logged_in' ],
+			'args'                => [
+				'version' => [ 'type' => 'string', 'required' => true ],
+			],
+		] );
 	}
 
 	public function check_permission( WP_REST_Request $request ) {
@@ -53,10 +70,17 @@ class UserController extends WP_REST_Controller {
 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
 	 */
 	public function create_user( WP_REST_Request $request ) {
-		$email    = $request->get_param( 'email' );
-		$nickname = $request->get_param( 'nickname' );
-		$phone    = $request->get_param( 'phone' );
-		$password = $request->get_param( 'password' );
+		$rate_check = Rate_Limiter::check( 'signup:' . Rate_Limiter::client_ip(), 10, DAY_IN_SECONDS );
+		if ( is_wp_error( $rate_check ) ) {
+			Audit_Log::record( 'rate_limited', array( 'metadata' => array( 'endpoint' => 'sign-up' ) ) );
+			return $rate_check;
+		}
+
+		$email           = $request->get_param( 'email' );
+		$nickname        = $request->get_param( 'nickname' );
+		$phone           = $request->get_param( 'phone' );
+		$password        = $request->get_param( 'password' );
+		$terms_accepted  = (bool) $request->get_param( 'terms_accepted' );
 
 		// Validate required fields
 		if ( empty( $email ) || empty( $nickname ) || empty( $password ) ) {
@@ -64,6 +88,14 @@ class UserController extends WP_REST_Controller {
 				'missing_required_fields',
 				__( 'Email, nickname, and password are required fields.' ),
 				array( 'status' => 400 )
+			);
+		}
+
+		if ( ! $terms_accepted ) {
+			return new WP_Error(
+				'terms_not_accepted',
+				__( 'Terms and conditions must be accepted.' ),
+				array( 'status' => 403 )
 			);
 		}
 
@@ -129,6 +161,16 @@ class UserController extends WP_REST_Controller {
 		if ( ! empty( $phone ) ) {
 			update_user_meta( $user_id, User_Meta_Keys::PHONE, sanitize_text_field( $phone ) );
 		}
+
+		// Email signup means the user picked their own nickname.
+		update_user_meta( $user_id, User_Meta_Keys::NICKNAME_CHOSEN, '1' );
+
+		// Persist terms acceptance.
+		$terms_version = get_option( 'pc_terms_current_version', '2026-05' );
+		update_user_meta( $user_id, User_Meta_Keys::TERMS_ACCEPTED_AT, time() );
+		update_user_meta( $user_id, User_Meta_Keys::TERMS_ACCEPTED_VERSION, $terms_version );
+
+		Audit_Log::record( 'signup', array( 'user_id' => $user_id, 'email' => $email ) );
 
 		// Prepare response data
 		$user          = get_user_by( 'id', $user_id );
@@ -197,10 +239,16 @@ class UserController extends WP_REST_Controller {
 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
 	 */
 	public function request_verification_code( WP_REST_Request $request ) {
+		$rate_check = Rate_Limiter::check( 'request_verification:' . Rate_Limiter::client_ip(), 5, 15 * MINUTE_IN_SECONDS );
+		if ( is_wp_error( $rate_check ) ) {
+			Audit_Log::record( 'rate_limited', array( 'metadata' => array( 'endpoint' => 'request-verification' ) ) );
+			return $rate_check;
+		}
+
 		$login    = $request->get_param( 'login' );
 		$password = $request->get_param( 'password' );
 
-		// Validate requirIn ed fields
+		// Validate required fields
 		if ( empty( $login ) || empty( $password ) ) {
 			return new WP_Error(
 				'missing_required_fields',
@@ -214,12 +262,15 @@ class UserController extends WP_REST_Controller {
 
 		// If the authentication fails return an error
 		if ( is_wp_error( $user ) ) {
+			Audit_Log::record( 'request_verification_failed', array( 'email' => $login ) );
 			return new WP_Error(
 				'authentication_failed',
 				__( 'Invalid login credentials.' ),
 				array( 'status' => 401 )
 			);
 		}
+
+		Audit_Log::record( 'request_verification', array( 'user_id' => $user->ID, 'email' => $user->user_email ) );
 
 		// Generate 6-digit verification code
 		$verification_code = sprintf( '%06d', mt_rand( 0, 999999 ) );
@@ -319,6 +370,7 @@ class UserController extends WP_REST_Controller {
 
 		// Verify the code
 		if ( $stored_code !== $verification_code ) {
+			Audit_Log::record( 'verify_failure', array( 'user_id' => $user->ID, 'metadata' => array( 'reason' => 'invalid_code' ) ) );
 			return new WP_Error(
 				'invalid_verification_code',
 				__( 'Invalid verification code.' ),
@@ -330,49 +382,88 @@ class UserController extends WP_REST_Controller {
 		delete_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE );
 		delete_user_meta( $user->ID, User_Meta_Keys::VERIFICATION_CODE_EXPIRY );
 
-		// Generate JWT token
-		$secret_key = defined( 'JWT_AUTH_SECRET_KEY' ) ? JWT_AUTH_SECRET_KEY : false;
-		if ( ! $secret_key ) {
+		$envelope = AuthController::issue_token_pair( $user );
+		if ( is_wp_error( $envelope ) ) {
+			return $envelope;
+		}
+
+		Audit_Log::record( 'verify_success', array( 'user_id' => $user->ID, 'metadata' => array( 'method' => 'email' ) ) );
+
+		return new WP_REST_Response( $envelope, 200 );
+	}
+
+	public function set_nickname( WP_REST_Request $request ) {
+		$user_id  = get_current_user_id();
+		$nickname = trim( (string) $request->get_param( 'nickname' ) );
+
+		if ( ! preg_match( '/^[A-Za-z0-9_]{3,20}$/', $nickname ) ) {
 			return new WP_Error(
-				'jwt_auth_bad_config',
-				__( 'JWT is not configured properly, please contact the admin.' ),
-				array( 'status' => 403 )
+				'invalid_nickname',
+				__( 'Nickname must be 3–20 characters of letters, digits, or underscores.' ),
+				array( 'status' => 400 )
 			);
 		}
 
-		$issuedAt  = time();
-		$notBefore = apply_filters( 'jwt_auth_not_before', $issuedAt, $issuedAt );
-		$expire    = apply_filters( 'jwt_auth_expire', $issuedAt + ( DAY_IN_SECONDS * 7 ), $issuedAt );
+		// Reject if any other user already uses it as user_login or nickname meta.
+		$existing_login = get_user_by( 'login', $nickname );
+		if ( $existing_login && (int) $existing_login->ID !== $user_id ) {
+			return new WP_Error( 'nickname_taken', __( 'Nickname already in use.' ), array( 'status' => 409 ) );
+		}
+		$nickname_match = get_users( array(
+			'meta_key'   => 'nickname',
+			'meta_value' => $nickname,
+			'exclude'    => array( $user_id ),
+			'number'     => 1,
+			'fields'     => 'ID',
+		) );
+		if ( ! empty( $nickname_match ) ) {
+			return new WP_Error( 'nickname_taken', __( 'Nickname already in use.' ), array( 'status' => 409 ) );
+		}
 
-		$token_data = [
-			'iss'  => get_bloginfo( 'url' ),
-			'iat'  => $issuedAt,
-			'nbf'  => $notBefore,
-			'exp'  => $expire,
-			'data' => [
-				'user' => [
-					'id' => $user->ID,
-				],
-			],
-		];
+		$user = get_user_by( 'id', $user_id );
+		wp_update_user( array(
+			'ID'           => $user_id,
+			'nickname'     => $nickname,
+			'display_name' => $nickname,
+		) );
 
-		$algorithm = apply_filters( 'jwt_auth_algorithm', 'HS256' );
-		$token     = JWT::encode(
-			apply_filters( 'jwt_auth_token_before_sign', $token_data, $user ),
-			$secret_key,
-			$algorithm
-		);
+		// Only rewrite user_login when the existing one is the auto-generated email-prefix
+		// pattern (e.g. set by GoogleAuthController::generate_username_from_email).
+		if ( $user && $user->user_login !== $nickname ) {
+			global $wpdb;
+			$wpdb->update( $wpdb->users, array( 'user_login' => $nickname ), array( 'ID' => $user_id ) );
+			clean_user_cache( $user_id );
+		}
 
-		$response_data = [
-			'token'             => $token,
-			'user_email'        => $user->user_email,
-			'user_nicename'     => $user->user_nicename,
-			'user_display_name' => $user->display_name,
-		];
+		update_user_meta( $user_id, User_Meta_Keys::NICKNAME_CHOSEN, '1' );
 
-		return new WP_REST_Response(
-			apply_filters( 'jwt_auth_token_before_dispatch', $response_data, $user ),
-			200
-		);
+		Audit_Log::record( 'set_nickname', array( 'user_id' => $user_id ) );
+
+		return new WP_REST_Response( array( 'nickname' => $nickname ), 200 );
+	}
+
+	public function accept_terms( WP_REST_Request $request ) {
+		$user_id          = get_current_user_id();
+		$version          = (string) $request->get_param( 'version' );
+		$current_version  = get_option( 'pc_terms_current_version', '2026-05' );
+
+		if ( $version !== $current_version ) {
+			return new WP_Error(
+				'invalid_terms_version',
+				__( 'Terms version is out of date.' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$now = time();
+		update_user_meta( $user_id, User_Meta_Keys::TERMS_ACCEPTED_AT, $now );
+		update_user_meta( $user_id, User_Meta_Keys::TERMS_ACCEPTED_VERSION, $current_version );
+
+		Audit_Log::record( 'accept_terms', array( 'user_id' => $user_id, 'metadata' => array( 'version' => $current_version ) ) );
+
+		return new WP_REST_Response( array(
+			'terms_accepted_at'      => $now,
+			'terms_accepted_version' => $current_version,
+		), 200 );
 	}
 }

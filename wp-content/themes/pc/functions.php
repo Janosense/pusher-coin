@@ -18,5 +18,6 @@ require_once TEMPLATE_DIR . '/app/utils.php';
 require TEMPLATE_DIR . '/app/rest-api.php';
 
 add_filter( 'jwt_auth_expire', function ( $exp ) {
-	return time() + DAY_IN_SECONDS;
+	$ttl = (int) get_option( 'pc_access_token_ttl_seconds', 900 );
+	return time() + $ttl;
 } );
