@@ -106,6 +106,22 @@ final class Refresh_Tokens {
 		return true;
 	}
 
+	/**
+	 * Revoke every active refresh token belonging to the user. Used by
+	 * password-change to invalidate other live sessions.
+	 *
+	 * @return int Number of rows updated.
+	 */
+	public static function revoke_all_for_user( int $user_id ): int {
+		global $wpdb;
+		$table = $wpdb->prefix . 'pc_refresh_tokens';
+		return (int) $wpdb->query( $wpdb->prepare(
+			"UPDATE $table SET revoked_at = %s WHERE user_id = %d AND revoked_at IS NULL",
+			gmdate( 'Y-m-d H:i:s' ),
+			$user_id
+		) );
+	}
+
 	private static function revoke_descendants( string $start_hash ): void {
 		global $wpdb;
 		$table = $wpdb->prefix . 'pc_refresh_tokens';

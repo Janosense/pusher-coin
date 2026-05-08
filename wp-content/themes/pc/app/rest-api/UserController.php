@@ -56,6 +56,51 @@ class UserController extends WP_REST_Controller {
 				'version' => [ 'type' => 'string', 'required' => true ],
 			],
 		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/me", [
+			[
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => [ $this, 'get_me' ],
+				'permission_callback' => [ Permissions::class, 'require_logged_in' ],
+			],
+			[
+				'methods'             => WP_REST_Server::EDITABLE,
+				'callback'            => [ $this, 'patch_me' ],
+				'permission_callback' => [ Permissions::class, 'require_logged_in' ],
+			],
+		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/request-email-confirmation", [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'request_email_confirmation' ],
+			'permission_callback' => [ Permissions::class, 'require_logged_in' ],
+		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/confirm-email", [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'confirm_email' ],
+			'permission_callback' => '__return_true',
+			'args'                => [
+				'token' => [ 'type' => 'string', 'required' => true ],
+			],
+		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/request-password-change", [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'request_password_change' ],
+			'permission_callback' => [ Permissions::class, 'require_logged_in' ],
+		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/confirm-password-change", [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'confirm_password_change' ],
+			'permission_callback' => [ Permissions::class, 'require_logged_in' ],
+			'args'                => [
+				'current_password' => [ 'type' => 'string', 'required' => true ],
+				'new_password'     => [ 'type' => 'string', 'required' => true ],
+				'code'             => [ 'type' => 'string', 'required' => true ],
+			],
+		] );
 	}
 
 	public function check_permission( WP_REST_Request $request ) {
@@ -465,5 +510,232 @@ class UserController extends WP_REST_Controller {
 			'terms_accepted_at'      => $now,
 			'terms_accepted_version' => $current_version,
 		), 200 );
+	}
+
+	public function get_me( WP_REST_Request $request ) {
+		$user = wp_get_current_user();
+		return new WP_REST_Response( $this->build_me_payload( $user ), 200 );
+	}
+
+	public function patch_me( WP_REST_Request $request ) {
+		$user_id = get_current_user_id();
+		$user    = wp_get_current_user();
+
+		if ( $request->has_param( 'phone' ) ) {
+			$phone = trim( (string) $request->get_param( 'phone' ) );
+			if ( $phone !== '' && ! preg_match( '/^[0-9 +()\-]{6,20}$/', $phone ) ) {
+				return new WP_Error(
+					'invalid_phone',
+					__( 'Phone number is invalid.' ),
+					array( 'status' => 400 )
+				);
+			}
+			if ( $phone === '' ) {
+				delete_user_meta( $user_id, User_Meta_Keys::PHONE );
+			} else {
+				update_user_meta( $user_id, User_Meta_Keys::PHONE, sanitize_text_field( $phone ) );
+			}
+		}
+
+		return new WP_REST_Response( $this->build_me_payload( $user ), 200 );
+	}
+
+	private function build_me_payload( \WP_User $user ): array {
+		$verified_at = (int) get_user_meta( $user->ID, User_Meta_Keys::EMAIL_VERIFIED_AT, true );
+		$accepted_at = (int) get_user_meta( $user->ID, User_Meta_Keys::TERMS_ACCEPTED_AT, true );
+		$accepted_version = (string) get_user_meta( $user->ID, User_Meta_Keys::TERMS_ACCEPTED_VERSION, true );
+		$current_version = (string) get_option( 'pc_terms_current_version', '2026-05' );
+
+		return array(
+			'id'                     => $user->ID,
+			'email'                  => $user->user_email,
+			'email_verified'         => $verified_at > 0,
+			'email_verified_at'      => $verified_at ?: null,
+			'nickname'               => $user->nickname ?: $user->display_name,
+			'phone'                  => (string) get_user_meta( $user->ID, User_Meta_Keys::PHONE, true ),
+			'phone_verified'         => false,
+			'terms_accepted'         => $accepted_at > 0 && $accepted_version === $current_version,
+			'terms_accepted_version' => $accepted_version,
+			'google_linked'          => ! empty( get_user_meta( $user->ID, User_Meta_Keys::GOOGLE_ID, true ) ),
+			'apple_linked'           => ! empty( get_user_meta( $user->ID, User_Meta_Keys::APPLE_ID, true ) ),
+			'balance_money'          => 0,
+			'balance_coins'          => 0,
+		);
+	}
+
+	public function request_email_confirmation( WP_REST_Request $request ) {
+		$user_id   = get_current_user_id();
+		$user      = wp_get_current_user();
+		$rate_check = Rate_Limiter::check( 'request_email_confirmation:' . $user_id, 5, 15 * MINUTE_IN_SECONDS );
+		if ( is_wp_error( $rate_check ) ) {
+			Audit_Log::record( 'rate_limited', array( 'user_id' => $user_id, 'metadata' => array( 'endpoint' => 'request-email-confirmation' ) ) );
+			return $rate_check;
+		}
+
+		$token  = rtrim( strtr( base64_encode( random_bytes( 32 ) ), '+/', '-_' ), '=' );
+		$ttl    = (int) get_option( 'pc_email_confirmation_ttl_seconds', 86400 );
+		$expiry = time() + $ttl;
+
+		update_user_meta( $user_id, User_Meta_Keys::EMAIL_CONFIRMATION_TOKEN, $token );
+		update_user_meta( $user_id, User_Meta_Keys::EMAIL_CONFIRMATION_EXPIRY, $expiry );
+
+		$base_url     = (string) get_option( 'pc_spa_base_url', home_url() );
+		$confirm_link = rtrim( $base_url, '/' ) . '/confirm-email?token=' . rawurlencode( $token );
+
+		$message = sprintf(
+			__( "Hello %s,\n\nConfirm your email by visiting the link below within 24 hours:\n\n%s\n\nIf you did not request this, you can ignore this message." ),
+			$user->display_name,
+			$confirm_link
+		);
+
+		$sent = wp_mail( $user->user_email, __( 'Confirm your email address' ), $message, array( 'Content-Type: text/plain; charset=UTF-8' ) );
+
+		if ( ! $sent ) {
+			delete_user_meta( $user_id, User_Meta_Keys::EMAIL_CONFIRMATION_TOKEN );
+			delete_user_meta( $user_id, User_Meta_Keys::EMAIL_CONFIRMATION_EXPIRY );
+			return new WP_Error(
+				'email_send_failed',
+				__( 'Failed to send confirmation email. Please try again later.' ),
+				array( 'status' => 500 )
+			);
+		}
+
+		Audit_Log::record( 'request_email_confirmation', array( 'user_id' => $user_id, 'email' => $user->user_email ) );
+
+		return new WP_REST_Response( array(
+			'success' => true,
+			'message' => __( 'A confirmation link has been sent to your email address.' )
+		), 200 );
+	}
+
+	public function confirm_email( WP_REST_Request $request ) {
+		$token = trim( (string) $request->get_param( 'token' ) );
+		if ( $token === '' ) {
+			return new WP_Error( 'token_invalid', __( 'Confirmation token is invalid.' ), array( 'status' => 401 ) );
+		}
+
+		$users = get_users( array(
+			'meta_key'   => User_Meta_Keys::EMAIL_CONFIRMATION_TOKEN,
+			'meta_value' => $token,
+			'number'     => 1,
+		) );
+		$user = ! empty( $users ) ? $users[0] : null;
+
+		if ( ! $user ) {
+			return new WP_Error( 'token_invalid', __( 'Confirmation token is invalid.' ), array( 'status' => 401 ) );
+		}
+
+		$expiry = (int) get_user_meta( $user->ID, User_Meta_Keys::EMAIL_CONFIRMATION_EXPIRY, true );
+		if ( $expiry <= 0 || $expiry < time() ) {
+			delete_user_meta( $user->ID, User_Meta_Keys::EMAIL_CONFIRMATION_TOKEN );
+			delete_user_meta( $user->ID, User_Meta_Keys::EMAIL_CONFIRMATION_EXPIRY );
+			return new WP_Error( 'token_expired', __( 'Confirmation token has expired.' ), array( 'status' => 401 ) );
+		}
+
+		update_user_meta( $user->ID, User_Meta_Keys::EMAIL_VERIFIED_AT, time() );
+		delete_user_meta( $user->ID, User_Meta_Keys::EMAIL_CONFIRMATION_TOKEN );
+		delete_user_meta( $user->ID, User_Meta_Keys::EMAIL_CONFIRMATION_EXPIRY );
+
+		Audit_Log::record( 'confirm_email', array( 'user_id' => $user->ID, 'email' => $user->user_email ) );
+
+		return new WP_REST_Response( array(
+			'success'           => true,
+			'email_verified_at' => time(),
+		), 200 );
+	}
+
+	public function request_password_change( WP_REST_Request $request ) {
+		$user_id = get_current_user_id();
+		$user    = wp_get_current_user();
+
+		$rate_check = Rate_Limiter::check( 'request_password_change:' . $user_id, 5, 15 * MINUTE_IN_SECONDS );
+		if ( is_wp_error( $rate_check ) ) {
+			Audit_Log::record( 'rate_limited', array( 'user_id' => $user_id, 'metadata' => array( 'endpoint' => 'request-password-change' ) ) );
+			return $rate_check;
+		}
+
+		$code   = sprintf( '%06d', mt_rand( 0, 999999 ) );
+		$ttl    = (int) get_option( 'pc_password_change_ttl_seconds', 900 );
+		$expiry = time() + $ttl;
+
+		update_user_meta( $user_id, User_Meta_Keys::PASSWORD_CHANGE_CODE, $code );
+		update_user_meta( $user_id, User_Meta_Keys::PASSWORD_CHANGE_CODE_EXPIRY, $expiry );
+
+		$message = sprintf(
+			__( "Hello %s,\n\nYour password change code is: %s\n\nThe code is valid for 15 minutes." ),
+			$user->display_name,
+			$code
+		);
+		$sent = wp_mail( $user->user_email, __( 'Password change code' ), $message, array( 'Content-Type: text/plain; charset=UTF-8' ) );
+
+		if ( ! $sent ) {
+			delete_user_meta( $user_id, User_Meta_Keys::PASSWORD_CHANGE_CODE );
+			delete_user_meta( $user_id, User_Meta_Keys::PASSWORD_CHANGE_CODE_EXPIRY );
+			return new WP_Error(
+				'email_send_failed',
+				__( 'Failed to send password change code. Please try again later.' ),
+				array( 'status' => 500 )
+			);
+		}
+
+		Audit_Log::record( 'request_password_change', array( 'user_id' => $user_id ) );
+
+		return new WP_REST_Response( array(
+			'success' => true,
+			'message' => __( 'A 6-digit code has been sent to your email address.' )
+		), 200 );
+	}
+
+	public function confirm_password_change( WP_REST_Request $request ) {
+		$user_id          = get_current_user_id();
+		$user             = wp_get_current_user();
+		$current_password = (string) $request->get_param( 'current_password' );
+		$new_password     = (string) $request->get_param( 'new_password' );
+		$code             = (string) $request->get_param( 'code' );
+
+		if ( $current_password === '' || $new_password === '' || $code === '' ) {
+			return new WP_Error( 'missing_required_fields', __( 'All fields are required.' ), array( 'status' => 400 ) );
+		}
+		if ( strlen( $new_password ) < 6 ) {
+			return new WP_Error( 'weak_password', __( 'Password must be at least 6 characters long.' ), array( 'status' => 400 ) );
+		}
+
+		$auth = wp_authenticate( $user->user_login, $current_password );
+		if ( is_wp_error( $auth ) ) {
+			Audit_Log::record( 'password_change_failure', array( 'user_id' => $user_id, 'metadata' => array( 'reason' => 'wrong_current_password' ) ) );
+			return new WP_Error( 'authentication_failed', __( 'Current password is incorrect.' ), array( 'status' => 401 ) );
+		}
+
+		$stored_code = (string) get_user_meta( $user_id, User_Meta_Keys::PASSWORD_CHANGE_CODE, true );
+		$expiry      = (int) get_user_meta( $user_id, User_Meta_Keys::PASSWORD_CHANGE_CODE_EXPIRY, true );
+
+		if ( $stored_code === '' ) {
+			return new WP_Error( 'no_verification_code', __( 'No password change code on file.' ), array( 'status' => 404 ) );
+		}
+		if ( $expiry < time() ) {
+			delete_user_meta( $user_id, User_Meta_Keys::PASSWORD_CHANGE_CODE );
+			delete_user_meta( $user_id, User_Meta_Keys::PASSWORD_CHANGE_CODE_EXPIRY );
+			return new WP_Error( 'verification_code_expired', __( 'Password change code has expired.' ), array( 'status' => 401 ) );
+		}
+		if ( ! hash_equals( $stored_code, $code ) ) {
+			Audit_Log::record( 'password_change_failure', array( 'user_id' => $user_id, 'metadata' => array( 'reason' => 'invalid_code' ) ) );
+			return new WP_Error( 'invalid_verification_code', __( 'Invalid password change code.' ), array( 'status' => 401 ) );
+		}
+
+		wp_set_password( $new_password, $user_id );
+		delete_user_meta( $user_id, User_Meta_Keys::PASSWORD_CHANGE_CODE );
+		delete_user_meta( $user_id, User_Meta_Keys::PASSWORD_CHANGE_CODE_EXPIRY );
+		Refresh_Tokens::revoke_all_for_user( $user_id );
+
+		// Re-fetch the user to pick up the updated password hash, then issue a fresh pair.
+		$fresh_user = get_user_by( 'id', $user_id );
+		$envelope   = AuthController::issue_token_pair( $fresh_user );
+		if ( is_wp_error( $envelope ) ) {
+			return $envelope;
+		}
+
+		Audit_Log::record( 'password_change', array( 'user_id' => $user_id ) );
+
+		return new WP_REST_Response( $envelope, 200 );
 	}
 }

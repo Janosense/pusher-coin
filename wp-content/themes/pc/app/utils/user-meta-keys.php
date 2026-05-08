@@ -34,4 +34,11 @@ final class User_Meta_Keys {
 	public const TERMS_ACCEPTED_AT      = 'terms_accepted_at';
 	public const TERMS_ACCEPTED_VERSION = 'terms_accepted_version';
 	public const NICKNAME_CHOSEN        = 'nickname_chosen';
+
+	// Phase 2 — email confirmation and password change.
+	public const EMAIL_VERIFIED_AT          = 'email_verified_at';
+	public const EMAIL_CONFIRMATION_TOKEN   = 'email_confirmation_token';
+	public const EMAIL_CONFIRMATION_EXPIRY  = 'email_confirmation_expiry';
+	public const PASSWORD_CHANGE_CODE        = 'password_change_code';
+	public const PASSWORD_CHANGE_CODE_EXPIRY = 'password_change_code_expiry';
 }

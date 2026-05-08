@@ -57,11 +57,28 @@ final class Permissions {
 		return true;
 	}
 
+	public static function require_email_verified( WP_REST_Request $request ) {
+		$logged_in = self::require_logged_in( $request );
+		if ( is_wp_error( $logged_in ) ) {
+			return $logged_in;
+		}
+		$verified_at = (int) get_user_meta( get_current_user_id(), User_Meta_Keys::EMAIL_VERIFIED_AT, true );
+		if ( $verified_at <= 0 ) {
+			return new WP_Error(
+				'email_not_verified',
+				__( 'Email verification required.' ),
+				array( 'status' => 403 )
+			);
+		}
+		return true;
+	}
+
 	public static function require_play_ready( WP_REST_Request $request ) {
 		$checks = array(
 			self::require_logged_in( $request ),
 			self::require_terms_accepted( $request ),
 			self::require_chosen_nickname( $request ),
+			self::require_email_verified( $request ),
 		);
 		foreach ( $checks as $check ) {
 			if ( is_wp_error( $check ) ) {

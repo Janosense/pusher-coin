@@ -156,6 +156,7 @@ class AuthController extends WP_REST_Controller {
 		$accepted_at      = (int) get_user_meta( $user->ID, User_Meta_Keys::TERMS_ACCEPTED_AT, true );
 		$accepted_version = get_user_meta( $user->ID, User_Meta_Keys::TERMS_ACCEPTED_VERSION, true );
 		$nickname_chosen  = get_user_meta( $user->ID, User_Meta_Keys::NICKNAME_CHOSEN, true ) === '1';
+		$email_verified   = (int) get_user_meta( $user->ID, User_Meta_Keys::EMAIL_VERIFIED_AT, true ) > 0;
 
 		$envelope = array(
 			'access_token'             => $access_token,
@@ -168,6 +169,7 @@ class AuthController extends WP_REST_Controller {
 			'user_display_name'        => $user->display_name,
 			'terms_accepted'           => $accepted_at > 0 && $accepted_version === $current_version,
 			'nickname_required'        => ! $nickname_chosen,
+			'email_verified'           => $email_verified,
 		);
 
 		return apply_filters( 'jwt_auth_token_before_dispatch', $envelope, $user );

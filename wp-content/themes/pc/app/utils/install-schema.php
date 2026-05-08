@@ -12,7 +12,7 @@ namespace PC;
  * `install_schema()`, and update DATA-MODEL.md.
  */
 final class Install_Schema {
-	public const DB_VERSION = '1.0.0';
+	public const DB_VERSION = '1.1.0';
 
 	public static function maybe_install(): void {
 		$installed = get_option( 'pc_db_version', '0.0.0' );
@@ -69,6 +69,10 @@ final class Install_Schema {
 		add_option( 'pc_terms_current_version', '2026-05' );
 		add_option( 'pc_access_token_ttl_seconds', 900 );
 		add_option( 'pc_refresh_token_ttl_seconds', 604800 );
+		// Phase 2.
+		add_option( 'pc_email_confirmation_ttl_seconds', 86400 );
+		add_option( 'pc_password_change_ttl_seconds', 900 );
+		add_option( 'pc_spa_base_url', home_url() );
 	}
 }
 
