@@ -73,6 +73,21 @@ final class Permissions {
 		return true;
 	}
 
+	public static function require_admin( WP_REST_Request $request ) {
+		$logged_in = self::require_logged_in( $request );
+		if ( is_wp_error( $logged_in ) ) {
+			return $logged_in;
+		}
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return new WP_Error(
+				'rest_forbidden',
+				__( 'Administrator privileges required.' ),
+				array( 'status' => 403 )
+			);
+		}
+		return true;
+	}
+
 	public static function require_play_ready( WP_REST_Request $request ) {
 		$checks = array(
 			self::require_logged_in( $request ),
