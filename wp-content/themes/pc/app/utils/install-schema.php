@@ -12,7 +12,7 @@ namespace PC;
  * `install_schema()`, and update DATA-MODEL.md.
  */
 final class Install_Schema {
-	public const DB_VERSION = '1.1.0';
+	public const DB_VERSION = '1.2.0';
 
 	public static function maybe_install(): void {
 		$installed = get_option( 'pc_db_version', '0.0.0' );
@@ -30,8 +30,9 @@ final class Install_Schema {
 
 		$charset_collate = $wpdb->get_charset_collate();
 
-		$refresh_tokens = $wpdb->prefix . 'pc_refresh_tokens';
-		$audit_log      = $wpdb->prefix . 'pc_auth_audit_log';
+		$refresh_tokens  = $wpdb->prefix . 'pc_refresh_tokens';
+		$audit_log       = $wpdb->prefix . 'pc_auth_audit_log';
+		$room_schedules  = $wpdb->prefix . 'pc_room_schedules';
 
 		dbDelta( "CREATE TABLE $refresh_tokens (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -62,6 +63,20 @@ final class Install_Schema {
 			KEY event_type (event_type),
 			KEY created_at (created_at),
 			KEY user_id (user_id)
+		) $charset_collate;" );
+
+		dbDelta( "CREATE TABLE $room_schedules (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			room_id BIGINT UNSIGNED NOT NULL,
+			weekday TINYINT UNSIGNED NOT NULL,
+			start_time TIME NOT NULL,
+			end_time TIME NOT NULL,
+			recurrence VARCHAR(16) NOT NULL DEFAULT 'always',
+			once_date DATE NULL DEFAULT NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY  (id),
+			KEY room_id (room_id),
+			KEY weekday (weekday)
 		) $charset_collate;" );
 	}
 
