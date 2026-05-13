@@ -12,7 +12,7 @@ namespace PC;
  * `install_schema()`, and update DATA-MODEL.md.
  */
 final class Install_Schema {
-	public const DB_VERSION = '1.2.0';
+	public const DB_VERSION = '1.3.0';
 
 	public static function maybe_install(): void {
 		$installed = get_option( 'pc_db_version', '0.0.0' );
@@ -33,6 +33,9 @@ final class Install_Schema {
 		$refresh_tokens  = $wpdb->prefix . 'pc_refresh_tokens';
 		$audit_log       = $wpdb->prefix . 'pc_auth_audit_log';
 		$room_schedules  = $wpdb->prefix . 'pc_room_schedules';
+		$wallets         = $wpdb->prefix . 'pc_wallets';
+		$coin_lots       = $wpdb->prefix . 'pc_coin_lots';
+		$transactions    = $wpdb->prefix . 'pc_transactions';
 
 		dbDelta( "CREATE TABLE $refresh_tokens (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -78,6 +81,44 @@ final class Install_Schema {
 			KEY room_id (room_id),
 			KEY weekday (weekday)
 		) $charset_collate;" );
+
+		dbDelta( "CREATE TABLE $wallets (
+			user_id BIGINT UNSIGNED NOT NULL,
+			balance_money DECIMAL(12,2) NOT NULL DEFAULT 0,
+			balance_coins INT NOT NULL DEFAULT 0,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY  (user_id)
+		) $charset_collate;" );
+
+		dbDelta( "CREATE TABLE $coin_lots (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			user_id BIGINT UNSIGNED NOT NULL,
+			qty INT NOT NULL,
+			unit_price DECIMAL(8,2) NOT NULL,
+			acquired_at DATETIME NOT NULL,
+			source_txn_id BIGINT UNSIGNED NULL DEFAULT NULL,
+			PRIMARY KEY  (id),
+			KEY user_id_qty (user_id, qty),
+			KEY acquired_at (acquired_at)
+		) $charset_collate;" );
+
+		dbDelta( "CREATE TABLE $transactions (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			user_id BIGINT UNSIGNED NOT NULL,
+			type VARCHAR(16) NOT NULL,
+			amount_money DECIMAL(12,2) NOT NULL DEFAULT 0,
+			amount_coins INT NOT NULL DEFAULT 0,
+			unit_price DECIMAL(8,2) NOT NULL DEFAULT 0,
+			status VARCHAR(16) NOT NULL DEFAULT 'pending',
+			external_ref VARCHAR(128) NULL DEFAULT NULL,
+			notes TEXT NULL DEFAULT NULL,
+			created_at DATETIME NOT NULL,
+			settled_at DATETIME NULL DEFAULT NULL,
+			PRIMARY KEY  (id),
+			KEY user_id_created (user_id, created_at),
+			KEY status (status),
+			KEY external_ref (external_ref)
+		) $charset_collate;" );
 	}
 
 	private static function install_default_options(): void {
@@ -88,6 +129,13 @@ final class Install_Schema {
 		add_option( 'pc_email_confirmation_ttl_seconds', 86400 );
 		add_option( 'pc_password_change_ttl_seconds', 900 );
 		add_option( 'pc_spa_base_url', home_url() );
+		// Phase 4 — coin pricing (UAH). Operator-tunable; these are
+		// starting points that approximate "1 coin = 1 USD" for an
+		// operator who hasn't visited the admin SPA yet.
+		add_option( 'pc_coin_price_default', '40.00' );
+		add_option( 'pc_coin_price_min', '10.00' );
+		add_option( 'pc_coin_price_max', '500.00' );
+		add_option( 'pc_liqpay_public_key', '' );
 	}
 }
 

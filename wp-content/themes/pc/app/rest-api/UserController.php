@@ -545,6 +545,7 @@ class UserController extends WP_REST_Controller {
 		$accepted_at = (int) get_user_meta( $user->ID, User_Meta_Keys::TERMS_ACCEPTED_AT, true );
 		$accepted_version = (string) get_user_meta( $user->ID, User_Meta_Keys::TERMS_ACCEPTED_VERSION, true );
 		$current_version = (string) get_option( 'pc_terms_current_version', '2026-05' );
+		$wallet          = Wallet_Service::get_wallet( $user->ID );
 
 		return array(
 			'id'                     => $user->ID,
@@ -558,8 +559,8 @@ class UserController extends WP_REST_Controller {
 			'terms_accepted_version' => $accepted_version,
 			'google_linked'          => ! empty( get_user_meta( $user->ID, User_Meta_Keys::GOOGLE_ID, true ) ),
 			'apple_linked'           => ! empty( get_user_meta( $user->ID, User_Meta_Keys::APPLE_ID, true ) ),
-			'balance_money'          => 0,
-			'balance_coins'          => 0,
+			'balance_money'          => $wallet['balance_money'],
+			'balance_coins'          => $wallet['balance_coins'],
 		);
 	}
 
