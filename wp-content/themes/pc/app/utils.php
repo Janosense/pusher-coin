@@ -10,3 +10,4 @@ require_once TEMPLATE_DIR . '/app/utils/refresh-tokens.php';
 require_once TEMPLATE_DIR . '/app/utils/permissions.php';
 require_once TEMPLATE_DIR . '/app/utils/cpt-room.php';
 require_once TEMPLATE_DIR . '/app/utils/room-schedule-calculator.php';
+require_once TEMPLATE_DIR . '/app/utils/cli/seed-rooms.php';
