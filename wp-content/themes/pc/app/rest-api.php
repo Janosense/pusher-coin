@@ -3,12 +3,14 @@
 use PC\AppleAuthController;
 use PC\AuthController;
 use PC\GoogleAuthController;
+use PC\RoomController;
 use PC\UserController;
 
 require_once TEMPLATE_DIR . '/app/rest-api/AuthController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/UserController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/GoogleAuthController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/AppleAuthController.php';
+require_once TEMPLATE_DIR . '/app/rest-api/RoomController.php';
 
 add_action( 'rest_api_init', function () {
 
@@ -23,4 +25,7 @@ add_action( 'rest_api_init', function () {
 
 	$apple_auth_controller = new AppleAuthController();
 	$apple_auth_controller->register_routes();
+
+	$room_controller = new RoomController();
+	$room_controller->register_routes();
 } );
