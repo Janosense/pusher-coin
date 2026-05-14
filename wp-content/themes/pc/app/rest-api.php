@@ -1,5 +1,6 @@
 <?php
 
+use PC\AdminCoinPricingController;
 use PC\AdminController;
 use PC\AdminRoomController;
 use PC\AdminWithdrawalController;
@@ -20,6 +21,7 @@ require_once TEMPLATE_DIR . '/app/rest-api/RoomController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/AdminController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/AdminRoomController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/AdminWithdrawalController.php';
+require_once TEMPLATE_DIR . '/app/rest-api/AdminCoinPricingController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/WalletController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/PaymentController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/TransactionsController.php';
@@ -49,6 +51,9 @@ add_action( 'rest_api_init', function () {
 
 	$admin_withdrawal_controller = new AdminWithdrawalController();
 	$admin_withdrawal_controller->register_routes();
+
+	$admin_coin_pricing_controller = new AdminCoinPricingController();
+	$admin_coin_pricing_controller->register_routes();
 
 	$wallet_controller = new WalletController();
 	$wallet_controller->register_routes();
