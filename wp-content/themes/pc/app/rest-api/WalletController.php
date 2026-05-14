@@ -39,6 +39,15 @@ class WalletController extends WP_REST_Controller {
 				'unit_price' => [ 'type' => 'string', 'required' => true ],
 			],
 		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/withdraw", [
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'withdraw' ],
+			'permission_callback' => [ Permissions::class, 'require_play_ready' ],
+			'args'                => [
+				'coin_qty' => [ 'type' => 'integer', 'required' => true ],
+			],
+		] );
 	}
 
 	public function get_wallet( WP_REST_Request $request ): WP_REST_Response {
@@ -139,6 +148,42 @@ class WalletController extends WP_REST_Controller {
 			'amount'         => $amount,
 			'checkout_url'   => LiqPay_Client::CHECKOUT_URL,
 			'liqpay'         => $envelope,
+		], 200 );
+	}
+
+	/**
+	 * Request a coin withdrawal. FIFO-debits the lots, stores the
+	 * consumed slices on the transaction row, and parks the row in
+	 * `pending` for admin review. Pays out happen out-of-band.
+	 */
+	public function withdraw( WP_REST_Request $request ) {
+		$user_id = get_current_user_id();
+		$qty     = (int) $request->get_param( 'coin_qty' );
+
+		if ( $qty <= 0 ) {
+			return new WP_Error( 'invalid_coin_qty', 'coin_qty must be a positive integer.', [ 'status' => 400 ] );
+		}
+
+		if ( Wallet_Service::has_pending_withdrawal( $user_id ) ) {
+			return new WP_Error(
+				'withdrawal_already_pending',
+				'You already have a withdrawal awaiting review. Wait for it to be processed before requesting another.',
+				[ 'status' => 409 ]
+			);
+		}
+
+		$result = Wallet_Service::request_withdrawal( $user_id, $qty );
+		if ( $result instanceof WP_Error ) {
+			$code   = $result->get_error_code();
+			$status = 'insufficient_balance' === $code ? 409 : 400;
+			return new WP_Error( $code, $result->get_error_message(), [ 'status' => $status ] );
+		}
+
+		return new WP_REST_Response( [
+			'transaction_id' => $result['txn_id'],
+			'status'         => Wallet_Service::STATUS_PENDING,
+			'amount_coins'   => $qty,
+			'amount_money'   => $result['amount_money'],
 		], 200 );
 	}
 

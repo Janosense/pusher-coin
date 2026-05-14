@@ -2,6 +2,7 @@
 
 use PC\AdminController;
 use PC\AdminRoomController;
+use PC\AdminWithdrawalController;
 use PC\AppleAuthController;
 use PC\AuthController;
 use PC\GoogleAuthController;
@@ -17,6 +18,7 @@ require_once TEMPLATE_DIR . '/app/rest-api/AppleAuthController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/RoomController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/AdminController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/AdminRoomController.php';
+require_once TEMPLATE_DIR . '/app/rest-api/AdminWithdrawalController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/WalletController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/PaymentController.php';
 
@@ -42,6 +44,9 @@ add_action( 'rest_api_init', function () {
 
 	$admin_room_controller = new AdminRoomController();
 	$admin_room_controller->register_routes();
+
+	$admin_withdrawal_controller = new AdminWithdrawalController();
+	$admin_withdrawal_controller->register_routes();
 
 	$wallet_controller = new WalletController();
 	$wallet_controller->register_routes();

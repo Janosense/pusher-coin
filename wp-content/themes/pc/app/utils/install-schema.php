@@ -12,7 +12,7 @@ namespace PC;
  * `install_schema()`, and update DATA-MODEL.md.
  */
 final class Install_Schema {
-	public const DB_VERSION = '1.3.0';
+	public const DB_VERSION = '1.4.0';
 
 	public static function maybe_install(): void {
 		$installed = get_option( 'pc_db_version', '0.0.0' );
@@ -112,6 +112,7 @@ final class Install_Schema {
 			status VARCHAR(16) NOT NULL DEFAULT 'pending',
 			external_ref VARCHAR(128) NULL DEFAULT NULL,
 			notes TEXT NULL DEFAULT NULL,
+			consumed_lots LONGTEXT NULL DEFAULT NULL,
 			created_at DATETIME NOT NULL,
 			settled_at DATETIME NULL DEFAULT NULL,
 			PRIMARY KEY  (id),

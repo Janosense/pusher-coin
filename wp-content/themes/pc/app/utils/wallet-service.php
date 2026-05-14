@@ -248,12 +248,11 @@ final class Wallet_Service {
 
 	/**
 	 * FIFO-consume `$qty` coins from the user's lots. Used by Phase 6
-	 * (the toss flow) and Step 4 (withdrawals against coin balance).
+	 * (the toss flow). Withdrawals call `request_withdrawal` instead so
+	 * the FIFO debit + transaction-row insert happen atomically.
 	 *
-	 * Returns a WP_Error on insufficient balance, otherwise an array of
+	 * Returns WP_Error on insufficient balance, otherwise an array of
 	 * `{ qty, unit_price }` slices describing which lots were consumed.
-	 * The caller can sum `qty * unit_price` to compute the money value
-	 * of the consumed coins (used for withdrawal payouts).
 	 */
 	public static function debit_fifo( int $user_id, int $qty ) {
 		if ( $qty <= 0 ) {
@@ -261,55 +260,215 @@ final class Wallet_Service {
 		}
 
 		global $wpdb;
-		$wallets_table = $wpdb->prefix . 'pc_wallets';
-		$lots_table    = $wpdb->prefix . 'pc_coin_lots';
-
 		$wpdb->query( 'START TRANSACTION' );
 		try {
-			$current = (int) $wpdb->get_var(
-				$wpdb->prepare( "SELECT balance_coins FROM $wallets_table WHERE user_id = %d FOR UPDATE", $user_id )
-			);
-			if ( $current < $qty ) {
+			$consumed = self::debit_fifo_inner( $user_id, $qty );
+			if ( $consumed instanceof WP_Error ) {
 				$wpdb->query( 'ROLLBACK' );
-				return new WP_Error( 'insufficient_balance', 'Not enough coins.' );
+				return $consumed;
 			}
-
-			$lots = $wpdb->get_results(
-				$wpdb->prepare(
-					"SELECT id, qty, unit_price FROM $lots_table WHERE user_id = %d AND qty > 0 ORDER BY acquired_at ASC, id ASC FOR UPDATE",
-					$user_id
-				),
-				ARRAY_A
-			);
-
-			$remaining = $qty;
-			$consumed  = [];
-			foreach ( $lots as $lot ) {
-				if ( 0 === $remaining ) {
-					break;
-				}
-				$take = min( $remaining, (int) $lot['qty'] );
-				$consumed[] = [ 'qty' => $take, 'unit_price' => $lot['unit_price'] ];
-
-				$new_qty = (int) $lot['qty'] - $take;
-				$wpdb->update( $lots_table, [ 'qty' => $new_qty ], [ 'id' => (int) $lot['id'] ], [ '%d' ], [ '%d' ] );
-				$remaining -= $take;
-			}
-
-			if ( $remaining > 0 ) {
-				// Shouldn't happen — guarded by the balance check above —
-				// but if it does, refuse rather than silently under-debit.
-				$wpdb->query( 'ROLLBACK' );
-				return new WP_Error( 'lot_inconsistent', 'Wallet balance and lot sum disagree.' );
-			}
-
-			self::upsert_wallet_delta( $user_id, '0', -$qty );
 			$wpdb->query( 'COMMIT' );
 			return $consumed;
 		} catch ( \Throwable $e ) {
 			$wpdb->query( 'ROLLBACK' );
 			return new WP_Error( 'wallet_write_failed', $e->getMessage() );
 		}
+	}
+
+	/**
+	 * FIFO core. Assumes the caller has opened a transaction and will
+	 * commit / roll back. Returns an array of `{ qty, unit_price }`
+	 * slices or a WP_Error.
+	 */
+	private static function debit_fifo_inner( int $user_id, int $qty ) {
+		global $wpdb;
+		$wallets_table = $wpdb->prefix . 'pc_wallets';
+		$lots_table    = $wpdb->prefix . 'pc_coin_lots';
+
+		$current = (int) $wpdb->get_var(
+			$wpdb->prepare( "SELECT balance_coins FROM $wallets_table WHERE user_id = %d FOR UPDATE", $user_id )
+		);
+		if ( $current < $qty ) {
+			return new WP_Error( 'insufficient_balance', 'Not enough coins.' );
+		}
+
+		$lots = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT id, qty, unit_price FROM $lots_table WHERE user_id = %d AND qty > 0 ORDER BY acquired_at ASC, id ASC FOR UPDATE",
+				$user_id
+			),
+			ARRAY_A
+		);
+
+		$remaining = $qty;
+		$consumed  = [];
+		foreach ( $lots as $lot ) {
+			if ( 0 === $remaining ) {
+				break;
+			}
+			$take = min( $remaining, (int) $lot['qty'] );
+			$consumed[] = [ 'qty' => $take, 'unit_price' => $lot['unit_price'] ];
+
+			$new_qty = (int) $lot['qty'] - $take;
+			$wpdb->update( $lots_table, [ 'qty' => $new_qty ], [ 'id' => (int) $lot['id'] ], [ '%d' ], [ '%d' ] );
+			$remaining -= $take;
+		}
+
+		if ( $remaining > 0 ) {
+			// Wallet/lot disagree — refuse rather than silently under-debit.
+			return new WP_Error( 'lot_inconsistent', 'Wallet balance and lot sum disagree.' );
+		}
+
+		self::upsert_wallet_delta( $user_id, '0', -$qty );
+		return $consumed;
+	}
+
+	/**
+	 * Create a pending withdrawal: FIFO-debit the coins from the
+	 * user's lots and write a `withdraw` transaction row with the
+	 * consumed slices stored on `consumed_lots` so a rejection later
+	 * can re-credit at the right unit prices.
+	 *
+	 * Returns the inserted txn id + the slices, or a WP_Error.
+	 */
+	public static function request_withdrawal( int $user_id, int $qty ) {
+		if ( $qty <= 0 ) {
+			return new WP_Error( 'invalid_qty', 'qty must be positive.' );
+		}
+		global $wpdb;
+		$wpdb->query( 'START TRANSACTION' );
+		try {
+			$consumed = self::debit_fifo_inner( $user_id, $qty );
+			if ( $consumed instanceof WP_Error ) {
+				$wpdb->query( 'ROLLBACK' );
+				return $consumed;
+			}
+
+			$amount_money = '0.00';
+			foreach ( $consumed as $slice ) {
+				$amount_money = bcadd( $amount_money, bcmul( (string) $slice['qty'], $slice['unit_price'], 2 ), 2 );
+			}
+
+			$wpdb->insert(
+				$wpdb->prefix . 'pc_transactions',
+				[
+					'user_id'        => $user_id,
+					'type'           => self::TYPE_WITHDRAW,
+					'amount_money'   => $amount_money,
+					'amount_coins'   => $qty,
+					'unit_price'     => '0.00',
+					'status'         => self::STATUS_PENDING,
+					'consumed_lots'  => wp_json_encode( $consumed ),
+					'created_at'     => current_time( 'mysql' ),
+				],
+				[ '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s' ]
+			);
+			$txn_id = (int) $wpdb->insert_id;
+
+			$wpdb->query( 'COMMIT' );
+			return [
+				'txn_id'       => $txn_id,
+				'amount_money' => $amount_money,
+				'consumed'     => $consumed,
+			];
+		} catch ( \Throwable $e ) {
+			$wpdb->query( 'ROLLBACK' );
+			return new WP_Error( 'wallet_write_failed', $e->getMessage() );
+		}
+	}
+
+	/**
+	 * Approve a pending withdrawal. The admin pays the player
+	 * out-of-band (bank transfer, etc.) and then calls this. Atomic on
+	 * the transaction row only — the coins were already debited at
+	 * request time.
+	 */
+	public static function approve_withdrawal( int $txn_id, ?string $admin_notes = null ): bool {
+		return self::update_transaction_status( $txn_id, self::STATUS_COMPLETED, $admin_notes );
+	}
+
+	/**
+	 * Reject a pending withdrawal. Re-credit the originally-consumed
+	 * coin slices as new lots (preserving each `unit_price`) and mark
+	 * the txn `refunded`. Atomic.
+	 */
+	public static function reject_withdrawal( int $txn_id, ?string $admin_notes = null ) {
+		global $wpdb;
+		$txn = self::get_transaction( $txn_id );
+		if ( ! $txn ) {
+			return new WP_Error( 'withdrawal_not_found', 'Withdrawal not found.' );
+		}
+		if ( self::TYPE_WITHDRAW !== $txn['type'] ) {
+			return new WP_Error( 'withdrawal_not_found', 'Transaction is not a withdrawal.' );
+		}
+		if ( self::STATUS_PENDING !== $txn['status'] ) {
+			return new WP_Error( 'withdrawal_not_pending', 'Withdrawal is not pending.' );
+		}
+
+		$slices = json_decode( (string) $txn['consumed_lots'], true );
+		if ( ! is_array( $slices ) ) {
+			$slices = [];
+		}
+
+		$now    = current_time( 'mysql' );
+		$user_id = (int) $txn['user_id'];
+
+		$wpdb->query( 'START TRANSACTION' );
+		try {
+			$total_qty = 0;
+			foreach ( $slices as $slice ) {
+				$qty = (int) ( $slice['qty'] ?? 0 );
+				$unit_price = (string) ( $slice['unit_price'] ?? '0.00' );
+				if ( $qty <= 0 ) {
+					continue;
+				}
+				$wpdb->insert(
+					$wpdb->prefix . 'pc_coin_lots',
+					[
+						'user_id'       => $user_id,
+						'qty'           => $qty,
+						'unit_price'    => $unit_price,
+						'acquired_at'   => $now,
+						'source_txn_id' => $txn_id,
+					],
+					[ '%d', '%d', '%s', '%s', '%d' ]
+				);
+				$total_qty += $qty;
+			}
+			if ( $total_qty > 0 ) {
+				self::upsert_wallet_delta( $user_id, '0', $total_qty );
+			}
+
+			$wpdb->update(
+				$wpdb->prefix . 'pc_transactions',
+				[
+					'status'     => self::STATUS_REFUNDED,
+					'settled_at' => $now,
+					'notes'      => $admin_notes,
+				],
+				[ 'id' => $txn_id ],
+				[ '%s', '%s', '%s' ],
+				[ '%d' ]
+			);
+			$wpdb->query( 'COMMIT' );
+			return true;
+		} catch ( \Throwable $e ) {
+			$wpdb->query( 'ROLLBACK' );
+			return new WP_Error( 'wallet_write_failed', $e->getMessage() );
+		}
+	}
+
+	public static function has_pending_withdrawal( int $user_id ): bool {
+		global $wpdb;
+		$count = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM {$wpdb->prefix}pc_transactions WHERE user_id = %d AND type = %s AND status = %s",
+				$user_id,
+				self::TYPE_WITHDRAW,
+				self::STATUS_PENDING
+			)
+		);
+		return $count > 0;
 	}
 
 	/**
