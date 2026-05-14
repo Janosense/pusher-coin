@@ -166,11 +166,58 @@ final class Wallet_Service {
 	}
 
 	/**
+	 * Settle a pending top-up transaction: flip its status to
+	 * `completed`, insert the matching coin lot, and increment the
+	 * wallet's `balance_coins` — all inside a single DB transaction so
+	 * a half-failed settlement can't leave a `completed` txn without a
+	 * lot (or vice versa).
+	 *
+	 * Idempotency is the caller's responsibility: check the txn status
+	 * before calling, and treat a non-`pending` row as already settled.
+	 */
+	public static function settle_topup( int $txn_id, int $user_id, int $qty, string $unit_price ): bool {
+		if ( $qty <= 0 ) {
+			return false;
+		}
+		global $wpdb;
+		$now = current_time( 'mysql' );
+		$wpdb->query( 'START TRANSACTION' );
+		try {
+			$wpdb->update(
+				$wpdb->prefix . 'pc_transactions',
+				[ 'status' => self::STATUS_COMPLETED, 'settled_at' => $now ],
+				[ 'id' => $txn_id ],
+				[ '%s', '%s' ],
+				[ '%d' ]
+			);
+			$wpdb->insert(
+				$wpdb->prefix . 'pc_coin_lots',
+				[
+					'user_id'       => $user_id,
+					'qty'           => $qty,
+					'unit_price'    => $unit_price,
+					'acquired_at'   => $now,
+					'source_txn_id' => $txn_id,
+				],
+				[ '%d', '%d', '%s', '%s', '%d' ]
+			);
+			self::upsert_wallet_delta( $user_id, '0', $qty );
+			$wpdb->query( 'COMMIT' );
+			return true;
+		} catch ( \Throwable $e ) {
+			$wpdb->query( 'ROLLBACK' );
+			return false;
+		}
+	}
+
+	/**
 	 * Credit a coin lot to the user's wallet atomically.
 	 *
-	 * Called from the LiqPay callback once a top-up settles. Inserts a
-	 * lot row, upserts the wallet, and increments `balance_coins` in a
-	 * single transaction.
+	 * Lower-level variant of `settle_topup` for callers that already
+	 * own the transaction-row update (e.g. an admin manual credit that
+	 * doesn't go through `wp_pc_transactions`). Inserts a lot row,
+	 * upserts the wallet, and increments `balance_coins` in a single
+	 * DB transaction.
 	 */
 	public static function credit_lot( int $user_id, int $qty, string $unit_price, ?int $source_txn_id = null ): bool {
 		if ( $qty <= 0 ) {
