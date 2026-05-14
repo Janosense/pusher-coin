@@ -53,6 +53,11 @@ class WalletController extends WP_REST_Controller {
 				'qty'        => $lot['qty'],
 				'unit_price' => $lot['unit_price'],
 			], $lots ),
+			'coin_pricing'  => [
+				'default' => (string) get_option( 'pc_coin_price_default', '40.00' ),
+				'min'     => (string) get_option( 'pc_coin_price_min', '10.00' ),
+				'max'     => (string) get_option( 'pc_coin_price_max', '500.00' ),
+			],
 		], 200 );
 	}
 
