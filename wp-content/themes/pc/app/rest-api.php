@@ -4,12 +4,14 @@ use PC\AdminCoinPricingController;
 use PC\AdminController;
 use PC\AdminMachineController;
 use PC\AdminRoomController;
+use PC\AdminSupportController;
 use PC\AdminWithdrawalController;
 use PC\AppleAuthController;
 use PC\AuthController;
 use PC\GoogleAuthController;
 use PC\PaymentController;
 use PC\RoomController;
+use PC\SupportController;
 use PC\TransactionsController;
 use PC\UserController;
 use PC\WalletController;
@@ -24,6 +26,8 @@ require_once TEMPLATE_DIR . '/app/rest-api/AdminRoomController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/AdminWithdrawalController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/AdminCoinPricingController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/AdminMachineController.php';
+require_once TEMPLATE_DIR . '/app/rest-api/AdminSupportController.php';
+require_once TEMPLATE_DIR . '/app/rest-api/SupportController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/WalletController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/PaymentController.php';
 require_once TEMPLATE_DIR . '/app/rest-api/TransactionsController.php';
@@ -59,6 +63,12 @@ add_action( 'rest_api_init', function () {
 
 	$admin_machine_controller = new AdminMachineController();
 	$admin_machine_controller->register_routes();
+
+	$admin_support_controller = new AdminSupportController();
+	$admin_support_controller->register_routes();
+
+	$support_controller = new SupportController();
+	$support_controller->register_routes();
 
 	$wallet_controller = new WalletController();
 	$wallet_controller->register_routes();

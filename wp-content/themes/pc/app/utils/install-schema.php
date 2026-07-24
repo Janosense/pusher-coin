@@ -12,7 +12,7 @@ namespace PC;
  * `install_schema()`, and update DATA-MODEL.md.
  */
 final class Install_Schema {
-	public const DB_VERSION = '1.5.0';
+	public const DB_VERSION = '1.6.0';
 
 	public static function maybe_install(): void {
 		$installed = get_option( 'pc_db_version', '0.0.0' );
@@ -37,6 +37,7 @@ final class Install_Schema {
 		$coin_lots       = $wpdb->prefix . 'pc_coin_lots';
 		$transactions    = $wpdb->prefix . 'pc_transactions';
 		$machine_events  = $wpdb->prefix . 'pc_machine_events';
+		$support_tickets = $wpdb->prefix . 'pc_support_tickets';
 
 		dbDelta( "CREATE TABLE $refresh_tokens (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -146,6 +147,28 @@ final class Install_Schema {
 			KEY user_id (user_id),
 			KEY status (status)
 		) $charset_collate;" );
+
+		// Phase 7 — support tickets. `user_id` is nullable because guests
+		// submit too; `email_verified` is captured at submission time so
+		// support can weigh a claim without re-checking the account later
+		// (and so it stays true about the moment the ticket was filed).
+		dbDelta( "CREATE TABLE $support_tickets (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			user_id BIGINT UNSIGNED NULL DEFAULT NULL,
+			email VARCHAR(255) NOT NULL,
+			subject_id BIGINT UNSIGNED NOT NULL,
+			description TEXT NOT NULL,
+			ip VARBINARY(16) NULL DEFAULT NULL,
+			user_agent VARCHAR(512) NOT NULL DEFAULT '',
+			email_verified TINYINT(1) NOT NULL DEFAULT 0,
+			status VARCHAR(16) NOT NULL DEFAULT 'open',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY  (id),
+			KEY status_created (status, created_at),
+			KEY user_id (user_id),
+			KEY subject_id (subject_id)
+		) $charset_collate;" );
 	}
 
 	private static function install_default_options(): void {
@@ -163,6 +186,11 @@ final class Install_Schema {
 		add_option( 'pc_coin_price_min', '10.00' );
 		add_option( 'pc_coin_price_max', '500.00' );
 		add_option( 'pc_liqpay_public_key', '' );
+		// Phase 7 — support. Empty captcha config means the guest path
+		// runs without a challenge; see Captcha_Verifier.
+		add_option( 'pc_support_email', get_option( 'admin_email' ) );
+		add_option( 'pc_captcha_provider', 'turnstile' );
+		add_option( 'pc_captcha_site_key', '' );
 	}
 }
 
