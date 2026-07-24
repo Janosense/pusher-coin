@@ -13,6 +13,8 @@ use WP_REST_Server;
  *
  *   GET  /pc/v1/admin/machine/state
  *   POST /pc/v1/admin/machine/power
+ *   GET  /pc/v1/admin/machine/bonus-map
+ *   PUT  /pc/v1/admin/machine/bonus-map
  *
  * Both are gated by `Permissions::require_admin`. The actual HA calls
  * live in `Machine_Service`; this controller is just the HTTP boundary
@@ -38,6 +40,23 @@ class AdminMachineController extends WP_REST_Controller {
 			'permission_callback' => [ Permissions::class, 'require_admin' ],
 			'args'                => [
 				'on' => [ 'type' => 'boolean', 'required' => true ],
+			],
+		] );
+
+		register_rest_route( $this->namespace, "/$this->rest_base/bonus-map", [
+			[
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => [ $this, 'get_bonus_map' ],
+				'permission_callback' => [ Permissions::class, 'require_admin' ],
+			],
+			[
+				'methods'             => WP_REST_Server::EDITABLE,
+				'callback'            => [ $this, 'put_bonus_map' ],
+				'permission_callback' => [ Permissions::class, 'require_admin' ],
+				'args'                => [
+					'map'              => [ 'required' => true ],
+					'relay_coin_count' => [ 'required' => true ],
+				],
 			],
 		] );
 	}
@@ -70,6 +89,63 @@ class AdminMachineController extends WP_REST_Controller {
 		] );
 
 		return new WP_REST_Response( [ 'ok' => true, 'on' => $on ], 200 );
+	}
+
+	public function get_bonus_map(): WP_REST_Response {
+		return new WP_REST_Response( $this->read_bonus_payload(), 200 );
+	}
+
+	public function put_bonus_map( WP_REST_Request $request ) {
+		$raw_map = $request->get_param( 'map' );
+		if ( ! is_array( $raw_map ) ) {
+			return new WP_Error( 'invalid_bonus_map', '`map` must be an object with keys 1..12.', [ 'status' => 400 ] );
+		}
+
+		$normalised = [];
+		for ( $i = 1; $i <= 12; $i++ ) {
+			$key = (string) $i;
+			if ( ! array_key_exists( $key, $raw_map ) && ! array_key_exists( $i, $raw_map ) ) {
+				return new WP_Error( 'invalid_bonus_map', sprintf( 'Missing entry for bonus number %d.', $i ), [ 'status' => 400 ] );
+			}
+			$value = $raw_map[ $key ] ?? $raw_map[ $i ];
+			if ( ! is_int( $value ) && ! ( is_string( $value ) && ctype_digit( $value ) ) ) {
+				return new WP_Error( 'invalid_bonus_map', sprintf( 'Bonus %d must be a non-negative integer.', $i ), [ 'status' => 400 ] );
+			}
+			$normalised[ $key ] = max( 0, (int) $value );
+		}
+
+		$relay_raw = $request->get_param( 'relay_coin_count' );
+		if ( ! is_int( $relay_raw ) && ! ( is_string( $relay_raw ) && ctype_digit( $relay_raw ) ) ) {
+			return new WP_Error( 'invalid_bonus_map', 'relay_coin_count must be a non-negative integer.', [ 'status' => 400 ] );
+		}
+		$relay_coin_count = max( 0, (int) $relay_raw );
+
+		update_option( 'pc_machine_bonus_map', wp_json_encode( $normalised ) );
+		update_option( 'pc_machine_relay_coin_count', $relay_coin_count );
+
+		Audit_Log::record( 'machine_bonus_map_updated', [
+			'user_id'  => get_current_user_id(),
+			'metadata' => [ 'relay_coin_count' => $relay_coin_count ],
+		] );
+
+		return new WP_REST_Response( $this->read_bonus_payload(), 200 );
+	}
+
+	/**
+	 * Returns the bonus map + relay coin count from WP options. Missing
+	 * entries default to 0 so a fresh install renders a usable form.
+	 */
+	private function read_bonus_payload(): array {
+		$stored = get_option( 'pc_machine_bonus_map', '' );
+		$decoded = is_string( $stored ) ? json_decode( $stored, true ) : null;
+		$map = [];
+		for ( $i = 1; $i <= 12; $i++ ) {
+			$map[ (string) $i ] = isset( $decoded[ (string) $i ] ) ? max( 0, (int) $decoded[ (string) $i ] ) : 0;
+		}
+		return [
+			'map'              => $map,
+			'relay_coin_count' => max( 0, (int) get_option( 'pc_machine_relay_coin_count', 0 ) ),
+		];
 	}
 
 	/**
