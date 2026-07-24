@@ -132,19 +132,15 @@ class AdminMachineController extends WP_REST_Controller {
 	}
 
 	/**
-	 * Returns the bonus map + relay coin count from WP options. Missing
-	 * entries default to 0 so a fresh install renders a usable form.
+	 * Returns the bonus map + relay coin count. Reads go through
+	 * `Machine_Ingest_Service` so the admin form and the payout path can
+	 * never disagree about what the stored map means; missing entries
+	 * default to 0 there, so a fresh install renders a usable form.
 	 */
 	private function read_bonus_payload(): array {
-		$stored = get_option( 'pc_machine_bonus_map', '' );
-		$decoded = is_string( $stored ) ? json_decode( $stored, true ) : null;
-		$map = [];
-		for ( $i = 1; $i <= 12; $i++ ) {
-			$map[ (string) $i ] = isset( $decoded[ (string) $i ] ) ? max( 0, (int) $decoded[ (string) $i ] ) : 0;
-		}
 		return [
-			'map'              => $map,
-			'relay_coin_count' => max( 0, (int) get_option( 'pc_machine_relay_coin_count', 0 ) ),
+			'map'              => Machine_Ingest_Service::bonus_map(),
+			'relay_coin_count' => Machine_Ingest_Service::relay_coin_count(),
 		];
 	}
 

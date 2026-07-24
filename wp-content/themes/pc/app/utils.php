@@ -13,4 +13,7 @@ require_once TEMPLATE_DIR . '/app/utils/room-schedule-calculator.php';
 require_once TEMPLATE_DIR . '/app/utils/wallet-service.php';
 require_once TEMPLATE_DIR . '/app/utils/liqpay-client.php';
 require_once TEMPLATE_DIR . '/app/utils/machine-service.php';
+require_once TEMPLATE_DIR . '/app/utils/machine-events.php';
+require_once TEMPLATE_DIR . '/app/utils/machine-ingest-service.php';
 require_once TEMPLATE_DIR . '/app/utils/cli/seed-rooms.php';
+require_once TEMPLATE_DIR . '/app/utils/cli/machine-ingest.php';

@@ -12,7 +12,7 @@ namespace PC;
  * `install_schema()`, and update DATA-MODEL.md.
  */
 final class Install_Schema {
-	public const DB_VERSION = '1.4.0';
+	public const DB_VERSION = '1.5.0';
 
 	public static function maybe_install(): void {
 		$installed = get_option( 'pc_db_version', '0.0.0' );
@@ -36,6 +36,7 @@ final class Install_Schema {
 		$wallets         = $wpdb->prefix . 'pc_wallets';
 		$coin_lots       = $wpdb->prefix . 'pc_coin_lots';
 		$transactions    = $wpdb->prefix . 'pc_transactions';
+		$machine_events  = $wpdb->prefix . 'pc_machine_events';
 
 		dbDelta( "CREATE TABLE $refresh_tokens (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -119,6 +120,31 @@ final class Install_Schema {
 			KEY user_id_created (user_id, created_at),
 			KEY status (status),
 			KEY external_ref (external_ref)
+		) $charset_collate;" );
+
+		// Phase 5 Step 5 — every machine event the backend mediates.
+		// `event_key` is the idempotency guard: a retried webhook or an
+		// overlapping poll collides on the unique index instead of
+		// crediting twice. NULL is allowed (MySQL lets a unique index
+		// hold repeated NULLs) so events that carry no natural key still
+		// log — see Machine_Ingest_Service for why callers should.
+		dbDelta( "CREATE TABLE $machine_events (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			machine_id VARCHAR(64) NOT NULL DEFAULT '',
+			event_type VARCHAR(32) NOT NULL,
+			event_key VARCHAR(191) NULL DEFAULT NULL,
+			user_id BIGINT UNSIGNED NULL DEFAULT NULL,
+			coins_credited INT NOT NULL DEFAULT 0,
+			unit_price DECIMAL(8,2) NOT NULL DEFAULT 0,
+			status VARCHAR(16) NOT NULL DEFAULT 'recorded',
+			payload LONGTEXT NULL DEFAULT NULL,
+			correlation_id BIGINT UNSIGNED NULL DEFAULT NULL,
+			created_at DATETIME(6) NOT NULL,
+			PRIMARY KEY  (id),
+			UNIQUE KEY event_key (event_key),
+			KEY event_type_created (event_type, created_at),
+			KEY user_id (user_id),
+			KEY status (status)
 		) $charset_collate;" );
 	}
 
