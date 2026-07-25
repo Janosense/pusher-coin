@@ -49,8 +49,17 @@ final class Captcha_Verifier {
 		return defined( 'PC_CAPTCHA_SECRET' ) ? (string) constant( 'PC_CAPTCHA_SECRET' ) : '';
 	}
 
+	/**
+	 * Whether the wp-config side is done. Reports presence only — the
+	 * admin API surfaces this so an operator can confirm the guest form
+	 * is protected without the secret ever crossing the wire.
+	 */
+	public static function is_secret_configured(): bool {
+		return '' !== self::secret();
+	}
+
 	public static function is_enabled(): bool {
-		return '' !== self::site_key() && '' !== self::secret();
+		return '' !== self::site_key() && self::is_secret_configured();
 	}
 
 	/**

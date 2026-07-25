@@ -53,6 +53,23 @@ class AdminSupportController extends WP_REST_Controller {
 			],
 		] );
 
+		register_rest_route( $this->namespace, "/$this->rest_base/captcha", [
+			[
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => [ $this, 'get_captcha' ],
+				'permission_callback' => [ Permissions::class, 'require_admin' ],
+			],
+			[
+				'methods'             => WP_REST_Server::EDITABLE,
+				'callback'            => [ $this, 'put_captcha' ],
+				'permission_callback' => [ Permissions::class, 'require_admin' ],
+				'args'                => [
+					'provider' => [ 'type' => 'string', 'required' => true ],
+					'site_key' => [ 'type' => 'string', 'required' => true ],
+				],
+			],
+		] );
+
 		register_rest_route( $this->namespace, "/$this->rest_base/subjects", [
 			[
 				'methods'             => WP_REST_Server::READABLE,
@@ -104,6 +121,45 @@ class AdminSupportController extends WP_REST_Controller {
 		] );
 
 		return new WP_REST_Response( $ticket, 200 );
+	}
+
+	/**
+	 * Captcha configuration for the admin form.
+	 *
+	 * The site key is public and editable here. The secret is not: it
+	 * lives in `PC_CAPTCHA_SECRET` in wp-config.php and is never read
+	 * back over HTTP. `secret_configured` reports only whether the
+	 * constant exists, so an operator can see the guest form's real
+	 * protection state without the value ever leaving the server.
+	 */
+	public function get_captcha(): WP_REST_Response {
+		return new WP_REST_Response( $this->captcha_payload(), 200 );
+	}
+
+	public function put_captcha( WP_REST_Request $request ) {
+		$provider = (string) $request->get_param( 'provider' );
+		if ( ! in_array( $provider, [ 'turnstile', 'hcaptcha' ], true ) ) {
+			return new WP_Error( 'invalid_captcha_config', 'provider must be turnstile or hcaptcha.', [ 'status' => 400 ] );
+		}
+
+		update_option( 'pc_captcha_provider', $provider );
+		update_option( 'pc_captcha_site_key', sanitize_text_field( (string) $request->get_param( 'site_key' ) ) );
+
+		Audit_Log::record( 'support_captcha_updated', [
+			'user_id'  => get_current_user_id(),
+			'metadata' => [ 'provider' => $provider, 'enabled' => Captcha_Verifier::is_enabled() ],
+		] );
+
+		return new WP_REST_Response( $this->captcha_payload(), 200 );
+	}
+
+	private function captcha_payload(): array {
+		return [
+			'provider'          => Captcha_Verifier::provider(),
+			'site_key'          => Captcha_Verifier::site_key(),
+			'secret_configured' => Captcha_Verifier::is_secret_configured(),
+			'enabled'           => Captcha_Verifier::is_enabled(),
+		];
 	}
 
 	public function get_subjects(): WP_REST_Response {
