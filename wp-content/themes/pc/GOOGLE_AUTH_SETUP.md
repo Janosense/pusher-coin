@@ -1,5 +1,18 @@
 # Google Sign-In Authentication Setup
 
+> **Status: parked (2026-07-25).** The SPA side is switched off while the
+> project runs without Google credentials — `VITE_GOOGLE_CLIENT_ID` is
+> empty in `frontend/.env` and `.env.production` (the previous value is
+> kept in a comment beside it), and the Google Identity Services
+> `<script>` is commented out in `frontend/index.html`. The button gates
+> itself on that variable, so nothing renders and no third-party script
+> loads.
+>
+> The backend below is unchanged and still functional — it answers
+> `google_not_configured` when its own client ID is absent. To bring the
+> flow back: restore the two frontend edits, then follow this document
+> for the server side. No code change is needed on either side.
+
 This document explains how to configure and use the Google Sign-In authentication endpoint for your WordPress site.
 
 ## Overview
