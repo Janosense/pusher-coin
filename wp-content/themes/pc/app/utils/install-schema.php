@@ -12,7 +12,7 @@ namespace PC;
  * `install_schema()`, and update DATA-MODEL.md.
  */
 final class Install_Schema {
-	public const DB_VERSION = '1.6.0';
+	public const DB_VERSION = '1.7.0';
 
 	public static function maybe_install(): void {
 		$installed = get_option( 'pc_db_version', '0.0.0' );
@@ -38,6 +38,8 @@ final class Install_Schema {
 		$transactions    = $wpdb->prefix . 'pc_transactions';
 		$machine_events  = $wpdb->prefix . 'pc_machine_events';
 		$support_tickets = $wpdb->prefix . 'pc_support_tickets';
+		$bet_sessions    = $wpdb->prefix . 'pc_bet_sessions';
+		$room_queues     = $wpdb->prefix . 'pc_room_queues';
 
 		dbDelta( "CREATE TABLE $refresh_tokens (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -169,6 +171,43 @@ final class Install_Schema {
 			KEY user_id (user_id),
 			KEY subject_id (subject_id)
 		) $charset_collate;" );
+
+		// Phase 6 — one row per turn at the head of a room's queue.
+		// `ended_at IS NULL` marks the live session; there is at most one
+		// per room, which is what makes "who owns this machine event?"
+		// answerable.
+		dbDelta( "CREATE TABLE $bet_sessions (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			user_id BIGINT UNSIGNED NOT NULL,
+			room_id BIGINT UNSIGNED NOT NULL,
+			started_at DATETIME NOT NULL,
+			ended_at DATETIME NULL DEFAULT NULL,
+			coins_played INT NOT NULL DEFAULT 0,
+			coins_won INT NOT NULL DEFAULT 0,
+			money_won DECIMAL(12,2) NOT NULL DEFAULT 0,
+			PRIMARY KEY  (id),
+			KEY room_open (room_id, ended_at),
+			KEY user_started (user_id, started_at)
+		) $charset_collate;" );
+
+		// Phase 6 — the queue itself. DATA-MODEL left this optional
+		// pending a presence-channel decision; we persist it because the
+		// turn (and therefore who gets paid for a bonus) must survive a
+		// page reload and a backend restart, which presence state does
+		// not. `last_seen_at` is what a stale entry is pruned on.
+		dbDelta( "CREATE TABLE $room_queues (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			room_id BIGINT UNSIGNED NOT NULL,
+			user_id BIGINT UNSIGNED NOT NULL,
+			coins_declared INT NOT NULL DEFAULT 0,
+			coins_remaining INT NOT NULL DEFAULT 0,
+			session_id BIGINT UNSIGNED NULL DEFAULT NULL,
+			joined_at DATETIME NOT NULL,
+			last_seen_at DATETIME NOT NULL,
+			PRIMARY KEY  (id),
+			UNIQUE KEY room_user (room_id, user_id),
+			KEY room_joined (room_id, joined_at)
+		) $charset_collate;" );
 	}
 
 	private static function install_default_options(): void {
@@ -191,6 +230,9 @@ final class Install_Schema {
 		add_option( 'pc_support_email', get_option( 'admin_email' ) );
 		add_option( 'pc_captcha_provider', 'turnstile' );
 		add_option( 'pc_captcha_site_key', '' );
+		// Phase 6 — how long a queue entry survives without a heartbeat
+		// (the SPA polls the queue endpoint, which touches it).
+		add_option( 'pc_queue_idle_timeout_seconds', 60 );
 	}
 }
 

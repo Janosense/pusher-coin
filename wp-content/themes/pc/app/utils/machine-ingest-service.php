@@ -172,6 +172,24 @@ final class Machine_Ingest_Service {
 			'correlation_id' => $context['correlation_id'] ?? null,
 		] );
 
+		if ( $credited ) {
+			/**
+			 * Fires after a machine event credits a player's wallet.
+			 *
+			 * Phase 6 hooks this to bank the win against the player's
+			 * open bet session. Kept as an action rather than a direct
+			 * call so this service stays free of game-session concepts —
+			 * it knows about machines and wallets, nothing else.
+			 *
+			 * @param int    $user_id    Credited player.
+			 * @param int    $coins      Coins credited.
+			 * @param string $unit_price Price each coin was credited at.
+			 * @param array  $context    Ingest context (machine_id, event_key…).
+			 * @param int    $event_id   `wp_pc_machine_events` row id.
+			 */
+			do_action( 'pc_machine_event_credited', $user_id, $coins, $unit_price, $context, $event_id );
+		}
+
 		return [
 			'event_id'   => $event_id,
 			'duplicate'  => false,

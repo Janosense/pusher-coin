@@ -18,5 +18,6 @@ require_once TEMPLATE_DIR . '/app/utils/captcha-verifier.php';
 require_once TEMPLATE_DIR . '/app/utils/support-service.php';
 require_once TEMPLATE_DIR . '/app/utils/machine-events.php';
 require_once TEMPLATE_DIR . '/app/utils/machine-ingest-service.php';
+require_once TEMPLATE_DIR . '/app/utils/queue-service.php';
 require_once TEMPLATE_DIR . '/app/utils/cli/seed-rooms.php';
 require_once TEMPLATE_DIR . '/app/utils/cli/machine-ingest.php';
